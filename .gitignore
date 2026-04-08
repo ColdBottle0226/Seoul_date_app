@@ -1,0 +1,38 @@
+.env
+*.env.local
+*.env.production
+
+# Java 빌드 산출물
+**/target/
+**/*.class
+**/*.jar
+**/*.war
+
+# Gradle
+**/.gradle/
+**/build/
+
+# Node
+**/node_modules/
+**/.next/
+**/dist/
+
+# IntelliJ
+.idea/
+*.iml
+
+# macOS
+.DS_Store
+
+# Docker 볼륨 (로컬 마운트)
+infra/mysql/data/
+infra/mongodb/data/
+infra/redis/data/
+infra/elasticsearch/data/
+infra/qdrant/storage/
+infra/minio/data/
+infra/kafka/data/
+
+# 로그
+logs/
+*.log
