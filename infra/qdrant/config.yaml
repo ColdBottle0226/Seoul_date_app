@@ -1,0 +1,31 @@
+# ============================================================
+# Qdrant v1.9 — 로컬 개발 설정
+# ============================================================
+
+storage:
+  storage_path: /qdrant/storage
+
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+  enable_cors: true
+  api_key: qdrant-local-key
+
+# 로컬 개발: 성능보다 안정성 우선
+optimizers:
+  default_segment_number: 2
+  max_segment_size: 200000
+  memmap_threshold: 50000
+  indexing_threshold: 20000
+  flush_interval_sec: 5
+
+# 컬렉션 기본값
+collection:
+  vectors:
+    size: 1536              # text-embedding-3-small 차원
+    distance: Cosine
+  optimizer_config:
+    indexing_threshold: 20000
+
+log_level: INFO

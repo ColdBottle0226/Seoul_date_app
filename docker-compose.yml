@@ -1,0 +1,508 @@
+# ============================================================
+# Seoul Date App — 로컬 개발 Docker Compose (Mac 16GB 최적화)
+#
+# 실행:         docker compose up -d
+# 종료:         docker compose down
+# 전체 초기화:  docker compose down -v
+#
+# [프로필 분리]
+# 인프라만:     docker compose up -d                  (기본)
+# AI 포함:      docker compose --profile ai up -d
+# 앱 전체:      docker compose --profile app up -d
+# ============================================================
+
+networks:
+  date-net:
+    driver: bridge
+
+volumes:
+  mysql-user-data:
+  mysql-place-data:
+  mysql-rec-data:
+  mongo-data:
+  redis-data:
+  kafka-data:
+  es-data:
+  qdrant-storage:
+  minio-data:
+
+services:
+
+  # ==========================================================
+  # ■ INFRASTRUCTURE — 기본 실행 대상
+  # ==========================================================
+
+  # ---------- MySQL user_db (port 3306) ----------
+  mysql-user:
+    image: mysql:8.0
+    container_name: date-mysql-user
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: user_db
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-user-data:/var/lib/mysql
+      - ./infra/mysql/init/01_user_db.sql:/docker-entrypoint-initdb.d/01_user_db.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+      - --innodb-buffer-pool-size=128M   # 기본 128M → Mac 메모리 절약
+      - --max-connections=50             # 기본 151 → 로컬은 50 충분
+      - --performance-schema=OFF         # 모니터링 스키마 비활성화 (메모리 절약)
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------- MySQL place_db (port 3307) ----------
+  mysql-place:
+    image: mysql:8.0
+    container_name: date-mysql-place
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: place_db
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-place-data:/var/lib/mysql
+      - ./infra/mysql/init/02_place_db.sql:/docker-entrypoint-initdb.d/02_place_db.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
+      - --performance-schema=OFF
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------- MySQL recommendation_db (port 3308) ----------
+  mysql-rec:
+    image: mysql:8.0
+    container_name: date-mysql-rec
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: recommendation_db
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql-rec-data:/var/lib/mysql
+      - ./infra/mysql/init/03_recommendation_db.sql:/docker-entrypoint-initdb.d/03_recommendation_db.sql:ro
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+09:00
+      - --innodb-buffer-pool-size=128M
+      - --max-connections=50
+      - --performance-schema=OFF
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------- MongoDB (port 27017) ----------
+  mongodb:
+    image: mongo:7.0
+    container_name: date-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: date_app
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./infra/mongodb/init/01_init.js:/docker-entrypoint-initdb.d/01_init.js:ro
+    # wiredTiger 캐시: 전체 메모리의 50%가 기본값 → 로컬은 256MB로 고정
+    command: mongod --wiredTigerCacheSizeGB 0.25
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------- Redis (port 6379) ----------
+  redis:
+    image: redis:7.2-alpine
+    container_name: date-redis
+    restart: unless-stopped
+    command: redis-server /usr/local/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+      - ./infra/redis/conf/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---------- Kafka KRaft (port 9092 / 9094) ----------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: date-kafka
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,EXTERNAL://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_RETENTION_HOURS: 24         # 로컬: 24h (기본 168h → 디스크 절약)
+      KAFKA_LOG_SEGMENT_BYTES: 52428800     # 50MB 세그먼트
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # JVM 힙 제한 — 기본 1GB → 로컬 256MB
+      KAFKA_HEAP_OPTS: "-Xmx256m -Xms256m"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Kafka 토픽 자동 생성 (init 컨테이너)
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: date-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      echo '--- Kafka 토픽 생성 시작 ---'
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic seoul.place.updated        --partitions 3 --replication-factor 1 --config retention.ms=86400000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic seoul.event.updated        --partitions 3 --replication-factor 1 --config retention.ms=86400000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic seoul.realtime.congestion  --partitions 6 --replication-factor 1 --config retention.ms=3600000
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic place.image.upload         --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic recommendation.requested   --partitions 3 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic vector.embed.requested     --partitions 3 --replication-factor 1
+      echo '--- 토픽 생성 완료 ---'
+      kafka-topics --bootstrap-server kafka:9092 --list
+      "
+    networks:
+      - date-net
+
+  # Kafka UI (개발 편의, port 8989)
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: date-kafka-ui
+    restart: unless-stopped
+    ports:
+      - "8989:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - date-net
+
+  # ---------- Elasticsearch (port 9200) ----------
+  # ⚠️ 가장 메모리를 많이 사용하는 서비스 — 512MB 힙 고정
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: date-elasticsearch
+    restart: unless-stopped
+    environment:
+      - node.name=es-node-1
+      - cluster.name=date-es-cluster
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m   # 512MB 고정 (기본값 사용 시 1GB+ 소비)
+      - bootstrap.memory_lock=true         # 스왑 방지
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  # ---------- Qdrant Vector DB (port 6333/6334) — profile: ai ----------
+  # AI 개발 시작 전까지는 비활성 (메모리 절약)
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    container_name: date-qdrant
+    restart: unless-stopped
+    profiles: ["ai"]
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    volumes:
+      - qdrant-storage:/qdrant/storage
+      - ./infra/qdrant/config.yaml:/qdrant/config/production.yaml:ro
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ---------- MinIO Object Storage (port 9000/9001) ----------
+  minio:
+    image: minio/minio:RELEASE.2024-03-26T22-10-45Z
+    container_name: date-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - date-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # MinIO 버킷 자동 생성
+  minio-init:
+    image: minio/mc:latest
+    container_name: date-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}
+      mc mb --ignore-existing local/places
+      mc mb --ignore-existing local/reviews
+      mc mb --ignore-existing local/events
+      mc mb --ignore-existing local/users
+      mc anonymous set download local/places
+      mc anonymous set download local/events
+      echo '--- MinIO 버킷 초기화 완료 ---'
+      mc ls local
+      "
+    networks:
+      - date-net
+
+  # ---------- Nginx (port 80) ----------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: date-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      - minio
+    networks:
+      - date-net
+
+  # ==========================================================
+  # ■ APPLICATIONS — profile: app (서비스 빌드 후 주석 해제)
+  # ==========================================================
+
+  # user-service:
+  #   build:
+  #     context: ./services/user-service
+  #     dockerfile: Dockerfile
+  #   container_name: date-user-service
+  #   restart: unless-stopped
+  #   profiles: ["app"]
+  #   ports:
+  #     - "8081:8081"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: local
+  #     SPRING_DATASOURCE_URL: jdbc:mysql://mysql-user:3306/user_db?useUnicode=true&characterEncoding=utf8mb4
+  #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+  #     SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+  #     SPRING_DATA_REDIS_HOST: redis
+  #     SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+  #     JWT_SECRET: ${JWT_SECRET}
+  #     JWT_ACCESS_EXPIRATION_MS: ${JWT_ACCESS_EXPIRATION_MS}
+  #     JWT_REFRESH_EXPIRATION_MS: ${JWT_REFRESH_EXPIRATION_MS}
+  #     JAVA_OPTS: "-Xmx256m -Xms128m"   # Spring Boot 힙 제한
+  #   depends_on:
+  #     mysql-user:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - date-net
+
+  # place-service:
+  #   build:
+  #     context: ./services/place-service
+  #     dockerfile: Dockerfile
+  #   container_name: date-place-service
+  #   profiles: ["app"]
+  #   ports:
+  #     - "8082:8082"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: local
+  #     SPRING_DATASOURCE_URL: jdbc:mysql://mysql-place:3306/place_db
+  #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+  #     SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+  #     SPRING_DATA_MONGODB_URI: mongodb://${MONGO_INITDB_ROOT_USERNAME}:${MONGO_INITDB_ROOT_PASSWORD}@mongodb:27017/date_app?authSource=admin
+  #     SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+  #     SPRING_ELASTICSEARCH_USERNAME: elastic
+  #     SPRING_ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD}
+  #     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #     MINIO_ENDPOINT: http://minio:9000
+  #     MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+  #     MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+  #     JAVA_OPTS: "-Xmx256m -Xms128m"
+  #   depends_on:
+  #     mysql-place:
+  #       condition: service_healthy
+  #     mongodb:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #     elasticsearch:
+  #       condition: service_healthy
+  #   networks:
+  #     - date-net
+
+  # recommendation-service:
+  #   build:
+  #     context: ./services/recommendation-service
+  #     dockerfile: Dockerfile
+  #   container_name: date-recommendation-service
+  #   profiles: ["app"]
+  #   ports:
+  #     - "8083:8083"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: local
+  #     SPRING_DATASOURCE_URL: jdbc:mysql://mysql-rec:3308/recommendation_db
+  #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
+  #     SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
+  #     SPRING_DATA_REDIS_HOST: redis
+  #     SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+  #     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #     JAVA_OPTS: "-Xmx256m -Xms128m"
+  #   depends_on:
+  #     mysql-rec:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - date-net
+
+  # ai-service:
+  #   build:
+  #     context: ./services/ai-service
+  #     dockerfile: Dockerfile
+  #   container_name: date-ai-service
+  #   profiles: ["ai", "app"]
+  #   ports:
+  #     - "8084:8084"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: local
+  #     SPRING_DATA_REDIS_HOST: redis
+  #     SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+  #     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #     QDRANT_HOST: qdrant
+  #     QDRANT_API_KEY: ${QDRANT_API_KEY}
+  #     OPENAI_API_KEY: ${OPENAI_API_KEY}
+  #     JAVA_OPTS: "-Xmx256m -Xms128m"
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #     kafka:
+  #       condition: service_healthy
+  #     qdrant:
+  #       condition: service_healthy
+  #   networks:
+  #     - date-net
+
+  # seoul-data-service:
+  #   build:
+  #     context: ./services/seoul-data-service
+  #     dockerfile: Dockerfile
+  #   container_name: date-seoul-data-service
+  #   profiles: ["app"]
+  #   ports:
+  #     - "8085:8085"
+  #   environment:
+  #     SPRING_PROFILES_ACTIVE: local
+  #     SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  #     SEOUL_OPEN_DATA_API_KEY: ${SEOUL_OPEN_DATA_API_KEY}
+  #     TOUR_API_SERVICE_KEY: ${TOUR_API_SERVICE_KEY}
+  #     KMA_API_KEY: ${KMA_API_KEY}
+  #     JAVA_OPTS: "-Xmx128m -Xms64m"
+  #   depends_on:
+  #     kafka:
+  #       condition: service_healthy
+  #   networks:
+  #     - date-net
