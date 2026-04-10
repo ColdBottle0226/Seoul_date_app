@@ -1,0 +1,98 @@
+# ============================================================
+# recommendation-service — Spring Boot 공통 설정
+# ============================================================
+
+server:
+  port: 8083
+
+spring:
+  application:
+    name: recommendation-service
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql-rec}:3306/recommendation_db?useUnicode=true&characterEncoding=utf8mb4&serverTimezone=Asia/Seoul
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: 6379
+      password: ${SPRING_DATA_REDIS_PASSWORD}
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+    consumer:
+      group-id: recommendation-service-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+
+# OpenFeign + Eureka (lb://서비스명 기반 라우팅)
+feign:
+  circuitbreaker:
+    enabled: true
+  client:
+    config:
+      default:
+        connectTimeout: 3000
+        readTimeout: 10000
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
+# Resilience4j (OpenFeign CircuitBreaker)
+resilience4j:
+  circuitbreaker:
+    instances:
+      placeServiceCB:
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+      aiServiceCB:
+        sliding-window-size: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+  timelimiter:
+    instances:
+      aiServiceCB:
+        timeout-duration: 30s     # LLM 호출 최대 대기 30초
+
+# 추천 캐시 TTL
+recommendation:
+  cache:
+    ttl-minutes: 10
+  llm:
+    rate-limit-per-hour: 10       # 사용자당 시간당 최대 LLM 호출 횟수
+
+# Actuator & Tracing
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}

@@ -19,6 +19,10 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    set('springCloudVersion', "2023.0.1")
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
@@ -34,6 +38,13 @@ dependencies {
     // Redis (중복 발행 방지 분산 락)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
+    // Spring Cloud
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+
+    // Micrometer & Zipkin
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
@@ -42,6 +53,16 @@ dependencies {
     testImplementation 'io.projectreactor:reactor-test'
 }
 
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'seoul-data-service.jar'
 }

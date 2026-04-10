@@ -1,3 +1,8 @@
 {
-    "kafka.clusters.selected": "seouloutdate-bG9jYWxob3N0OjkwOTQ"
+    "kafka.clusters.selected": "seouloutdate-bG9jYWxob3N0OjkwOTQ",
+    "java.configuration.updateBuildConfiguration": "interactive",
+    "java.import.gradle.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home",
+    "java.jdt.ls.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home",
+    "java.import.gradle.wrapper.enabled": true,
+    "spring-boot.ls.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home"
 }

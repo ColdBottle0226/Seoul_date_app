@@ -1,0 +1,9 @@
+rootProject.name = 'seoul-date-app'
+
+include 'services:config-server'
+include 'services:eureka-server'
+include 'services:api-gateway'
+include 'services:user-service'
+include 'services:recommendation-service'
+include 'services:ai-service'
+include 'services:seoul-data-service'

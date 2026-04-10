@@ -1,0 +1,3 @@
+// 루트 build.gradle — 공통 설정
+// Lombok 버전 오버라이드: gradle.properties의 lombok.version 참조
+// Spring Boot dependency-management 플러그인이 자동으로 BOM 버전을 대체함

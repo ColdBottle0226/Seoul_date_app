@@ -1,0 +1,65 @@
+# ============================================================
+# ai-service — Spring Boot 공통 설정
+# ============================================================
+
+server:
+  port: 8084
+
+spring:
+  application:
+    name: ai-service
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: 6379
+      password: ${SPRING_DATA_REDIS_PASSWORD}
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    consumer:
+      group-id: ai-service-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      auto-offset-reset: earliest
+      properties:
+        spring.json.trusted.packages: "*"
+
+# OpenAI
+openai:
+  api-key: ${OPENAI_API_KEY}
+  model: gpt-4o-mini
+  embedding-model: text-embedding-3-small
+  max-tokens: 2048
+
+# Qdrant
+qdrant:
+  host: ${QDRANT_HOST:qdrant}
+  port: ${QDRANT_PORT:6333}
+  api-key: ${QDRANT_API_KEY}
+  collection:
+    place-vectors: place_vectors
+    course-pattern-vectors: course_pattern_vectors
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
+# Actuator & Tracing
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}

@@ -1,0 +1,52 @@
+# ============================================================
+# Eureka Server — Config Server 배포 설정
+# 경로: infra/config-repo/eureka-server/application.yml
+#
+# Config Server가 eureka-server 서비스 기동 시 이 파일을 배포한다.
+# docker-compose.yml의 환경변수로 오버라이드 가능.
+# ============================================================
+
+server:
+  port: ${SERVER_PORT:8761}
+
+eureka:
+  instance:
+    hostname: ${EUREKA_INSTANCE_HOSTNAME:eureka-server}
+    metadata-map:
+      zone: ${EUREKA_ZONE:local}
+      environment: ${SPRING_PROFILES_ACTIVE:local}
+    health-check-url-path: /actuator/health
+    status-page-url-path: /actuator/info
+
+  client:
+    register-with-eureka: false
+    fetch-registry: false
+    service-url:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+
+  server:
+    enable-self-preservation: ${EUREKA_SELF_PRESERVATION:false}
+    eviction-interval-timer-in-ms: 5000
+    response-cache-update-interval-ms: 5000
+    response-cache-auto-expiration-in-seconds: 60
+    wait-time-in-ms-when-sync-empty: 0
+    renewal-percent-threshold: 0.85
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: eureka-server
+
+logging:
+  level:
+    com.netflix.eureka: WARN
+    com.netflix.discovery: WARN
+    org.springframework.cloud.netflix.eureka.server: INFO
+    com.netflix.eureka.registry.AbstractInstanceRegistry: INFO

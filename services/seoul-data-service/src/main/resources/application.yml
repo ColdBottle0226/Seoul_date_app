@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: seoul-data-service
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+
+server:
+  port: 8085
+
+# API Keys (환경 변수로 주입)
+seoul:
+  api:
+    key: ${SEOUL_OPEN_DATA_API_KEY:}
+tour:
+  api:
+    key: ${TOUR_API_SERVICE_KEY:}
+kma:
+  api:
+    key: ${KMA_API_KEY:}
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+
+# Zipkin
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+
+logging:
+  level:
+    com.seouldate.data: INFO

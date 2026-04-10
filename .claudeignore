@@ -75,3 +75,16 @@
 **/*.zip
 **/*.tar.gz
 **/*.gz
+
+
+
+# 로그
+logs/
+*.log
+
+
+build.gradle
+settings.gradle
+
+**/.vscode/
+

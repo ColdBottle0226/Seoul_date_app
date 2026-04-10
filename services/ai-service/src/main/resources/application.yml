@@ -1,0 +1,55 @@
+spring:
+  application:
+    name: ai-service
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    consumer:
+      group-id: ai-service-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+
+server:
+  port: 8084
+
+# Qdrant 설정
+qdrant:
+  host: ${QDRANT_HOST:qdrant}
+  port: ${QDRANT_PORT:6333}
+  api-key: ${QDRANT_API_KEY:}
+
+# OpenAI 설정
+openai:
+  api-key: ${OPENAI_API_KEY:}
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+
+# Zipkin
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+
+logging:
+  level:
+    com.seouldate.ai: INFO
