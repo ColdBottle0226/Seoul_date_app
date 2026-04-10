@@ -1,0 +1,64 @@
+# ============================================================
+# seoul-data-service — Spring Boot 공통 설정
+# ============================================================
+
+server:
+  port: 8085
+
+spring:
+  application:
+    name: seoul-data-service
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      retries: 3
+      acks: all
+
+# 서울 공공데이터 API 키
+seoul:
+  open-data:
+    api-key: ${SEOUL_OPEN_DATA_API_KEY}
+    base-url: http://openapi.seoul.go.kr:8088
+  congestion:
+    polling-interval-ms: 300000      # 5분
+  event:
+    polling-interval-ms: 3600000     # 1시간
+  place:
+    polling-interval-ms: 86400000    # 1일
+
+# 기상청 API
+kma:
+  api-key: ${KMA_API_KEY}
+  base-url: http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0
+
+# TourAPI
+tour:
+  api:
+    service-key: ${TOUR_API_SERVICE_KEY}
+    base-url: http://apis.data.go.kr/B551011/KorService1
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+
+# Actuator & Tracing
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}

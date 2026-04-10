@@ -1,0 +1,353 @@
+spring:
+  application:
+    name: api-gateway
+
+  # ============================================================
+  # Config Server 연동
+  # 우선순위: Config Server 값 > 로컬 application.yml
+  # optional: prefix → Config Server 미기동 시에도 로컬로 구동 가능
+  # ============================================================
+  config:
+    # 로컬 개발 기본값: localhost:8888
+    # Docker 환경: 환경변수 SPRING_CONFIG_SERVER_URI=http://config-server:8888 로 오버라이드
+    import: "optional:configserver:${SPRING_CONFIG_SERVER_URI:http://localhost:8888}"
+
+  cloud:
+    gateway:
+      # ----------------------------------------------------------
+      # [서비스 디스커버리 기반 동적 라우팅]
+      # enabled: true 이면 Eureka에 등록된 모든 서비스를
+      # lb://<service-id>/<path> 형태로 자동 노출
+      # lower-case-service-id: 서비스명 소문자 강제 (USER-SERVICE → user-service)
+      # 수동 라우팅(routes 섹션)과 함께 사용 가능.
+      # ----------------------------------------------------------
+      discovery:
+        locator:
+          enabled: false           # 수동 라우팅 우선 (명시적 제어)
+          lower-case-service-id: true
+
+      # ----------------------------------------------------------
+      # [CORS 전역 설정]
+      # 클라이언트(Frontend)에서 8080 포트로 API 호출 시 브라우저 정책 허용
+      # allowedOriginPatterns: 개발은 *, 운영은 특정 도메인으로 교체
+      # ----------------------------------------------------------
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOriginPatterns:
+              - "http://localhost:3000"   # Frontend dev server
+              - "http://localhost:80"
+              - "${ALLOWED_ORIGIN:http://localhost:3000}"
+            allowedMethods:
+              - GET
+              - POST
+              - PUT
+              - PATCH
+              - DELETE
+              - OPTIONS
+            allowedHeaders:
+              - "*"
+            exposedHeaders:
+              - "X-User-Id"
+              - "X-Request-Id"
+            allowCredentials: true
+            maxAge: 3600
+
+      # ----------------------------------------------------------
+      # [Default Filter]
+      # 모든 라우트에 공통 적용되는 필터
+      # - RemoveRequestHeader: Cookie 헤더 제거 (보안)
+      # - AddResponseHeader: 응답에 Request-Id 추가 (디버깅)
+      # ----------------------------------------------------------
+      default-filters:
+        - RemoveRequestHeader=Cookie
+
+      routes:
+        # ── [1] user-auth: 인증 공개 엔드포인트 ─────────────────────
+        # /api/auth/** 는 JWT 검증 없이 통과 (회원가입, 로그인)
+        # RateLimiter: 인증 엔드포인트 브루트포스 방지 (IP당 30/min)
+        - id: user-auth
+          uri: lb://user-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userCB
+                fallbackUri: forward:/fallback/user
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [2] user-service: 인증 필요 사용자 API ──────────────────
+        # JwtAuthenticationFilter(GlobalFilter, order=-1)가 전역 처리하므로
+        # 여기선 CB + (필요시 사용자 기반 RateLimit) 만 추가
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userCB
+                fallbackUri: forward:/fallback/user
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [3] place-service (NestJS) ───────────────────────────────
+        # 검색/조회 트래픽이 많으므로 RateLimit 높게
+        # TimeLimiter: placeCB 3s (application.yml 하단 참조)
+        - id: place-service
+          uri: lb://place-service
+          predicates:
+            - Path=/api/places/**, /api/events/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: placeCB
+                fallbackUri: forward:/fallback/place
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 200
+                redis-rate-limiter.burstCapacity: 400
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [4] recommendation-service ───────────────────────────────
+        # TimeLimiter: recCB 10s (추천 생성은 AI 호출로 느림)
+        - id: recommendation-service
+          uri: lb://recommendation-service
+          predicates:
+            - Path=/api/recommendations/**, /api/courses/**, /api/feedbacks/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: recCB
+                fallbackUri: forward:/fallback/recommendation
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [5] ai-service ───────────────────────────────────────────
+        # LLM 호출로 지연 큼 → TimeLimiter 30s
+        # RateLimit 낮게 (비용 제어)
+        - id: ai-service
+          uri: lb://ai-service
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: aiCB
+                fallbackUri: forward:/fallback/ai
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [6] seoul-data-service ───────────────────────────────────
+        # 공공데이터 수집 서비스, 외부 API 의존
+        - id: seoul-data-service
+          uri: lb://seoul-data-service
+          predicates:
+            - Path=/api/seoul-data/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: seoulDataCB
+                fallbackUri: forward:/fallback/seoul-data
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+  # ----------------------------------------------------------
+  # [Redis 설정] Rate Limiter 토큰 버킷 저장소
+  # Lettuce 풀: 동시 Reactive 커넥션 최적화
+  # ----------------------------------------------------------
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
+      lettuce:
+        pool:
+          max-active: 8      # 최대 활성 커넥션
+          max-idle: 4        # 최대 유휴 커넥션
+          min-idle: 1        # 최소 유휴 커넥션
+          max-wait: -1ms     # 커넥션 대기 무제한(-1)
+
+server:
+  port: 8080
+  # 응답 헤더에 서버 정보 미노출 (보안)
+  server-header: ""
+
+# ============================================================
+# JWT 설정
+# Gateway에서 직접 검증하는 공유 시크릿
+# 운영 이전 RSA Public Key 방식으로 전환 권장
+# ============================================================
+jwt:
+  secret: ${JWT_SECRET:defaultSecretKeyForDevelopmentOnly1234567890}
+
+# ============================================================
+# [Eureka Client 설정]
+# Gateway가 Eureka에서 서비스 목록을 조회해 lb:// 주소 해석
+# prefer-ip-address: hostname 대신 실제 IP 등록 (Docker 환경 필수)
+# ============================================================
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+    # 레지스트리 캐시 갱신 주기 (기본 30s → 5s로 단축, 개발 환경)
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10    # 하트비트 주기
+    lease-expiration-duration-in-seconds: 30 # 이 시간 내 하트비트 없으면 제거
+    # 헬스체크 URL: Eureka가 인스턴스 상태 확인에 사용
+    health-check-url-path: /actuator/health
+    status-page-url-path: /actuator/info
+    metadata-map:
+      zone: local                            # 멀티 리전 대비 Zone 정보
+      version: ${spring.application.version:1.0.0}
+
+# ============================================================
+# [Resilience4j Circuit Breaker 설정]
+#
+# 상태 전이: CLOSED → OPEN → HALF_OPEN → CLOSED
+#
+# sliding-window-size: 판단 기준이 되는 호출 횟수 (최근 N회)
+# failure-rate-threshold: N회 중 실패 비율(%)이 이 값 초과 시 OPEN
+# wait-duration-in-open-state: OPEN 상태 유지 시간 (이후 HALF_OPEN)
+# permitted-number-of-calls-in-half-open-state: HALF_OPEN 시 허용 호출 수
+# slow-call-rate-threshold: 느린 호출 비율(%)도 실패로 간주
+# slow-call-duration-threshold: '느린 호출' 기준 시간
+# ============================================================
+resilience4j:
+  circuitbreaker:
+    configs:
+      # 공통 기본 설정 (개별 CB에서 오버라이드 가능)
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-rate-threshold: 80
+        slow-call-duration-threshold: 5s
+        register-health-indicator: true    # Actuator health에 CB 상태 노출
+        record-exceptions:
+          - java.io.IOException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.cloud.gateway.support.NotFoundException
+        ignore-exceptions:
+          - com.seouldate.gateway.exception.ClientException   # 4xx는 CB 카운트 제외
+    instances:
+      userCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+      placeCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+      recCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s   # 추천 서비스: 회복 대기 길게
+        permitted-number-of-calls-in-half-open-state: 2
+      aiCB:
+        base-config: default
+        sliding-window-size: 5            # AI 서비스: 샘플 수 줄임 (비용)
+        failure-rate-threshold: 40
+        wait-duration-in-open-state: 30s  # AI 장애 시 30초 대기
+        permitted-number-of-calls-in-half-open-state: 1
+      seoulDataCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 60        # 공공API는 간헐적 실패 허용
+        wait-duration-in-open-state: 20s
+        permitted-number-of-calls-in-half-open-state: 3
+
+  # ------------------------------------------------------------
+  # [TimeLimiter 설정]
+  # Gateway에서 다운스트림 서비스 응답이 지정 시간 초과 시 강제 종료
+  # Circuit Breaker와 동일한 instance 이름을 공유
+  # ------------------------------------------------------------
+  timelimiter:
+    configs:
+      default:
+        cancel-running-future: true   # 타임아웃 시 진행 중 요청 취소
+    instances:
+      userCB:
+        timeout-duration: 5s
+      placeCB:
+        timeout-duration: 3s
+      recCB:
+        timeout-duration: 10s
+      aiCB:
+        timeout-duration: 30s         # LLM 호출 최대 허용 시간
+      seoulDataCB:
+        timeout-duration: 5s
+
+# ============================================================
+# [Actuator & 모니터링]
+# - health: 서비스 + CB 상태 포함
+# - gateway: 현재 라우팅 정보 조회 (/actuator/gateway/routes)
+# - circuitbreakers: CB 상태 조회
+# - prometheus: Prometheus 스크래핑 (운영 메트릭)
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, gateway, circuitbreakers, prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized   # 운영: 인증된 요청만 상세 노출
+      show-components: always
+    gateway:
+      enabled: true
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  # Micrometer 공통 태그: 모든 메트릭에 service 태그 추가
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+# ============================================================
+# [로깅]
+# Gateway 요청/응답 흐름 추적을 위한 레벨 설정
+# ============================================================
+logging:
+  level:
+    # Gateway 라우팅 디버그 (운영에서는 INFO)
+    org.springframework.cloud.gateway: INFO
+    org.springframework.cloud.gateway.route.RouteDefinitionRouteLocator: INFO
+    # Reactor Netty HTTP 클라이언트 (다운스트림 호출)
+    reactor.netty.http.client: INFO
+    # JWT 필터 (DEBUG로 변경 시 토큰 파싱 과정 확인 가능)
+    com.seouldate.gateway: INFO
+    # Resilience4j CB 상태 전이 로그
+    io.github.resilience4j: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{traceId}/%X{spanId}] %logger{36} - %msg%n"

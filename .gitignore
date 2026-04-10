@@ -36,3 +36,8 @@ infra/kafka/data/
 # 로그
 logs/
 *.log
+
+
+
+**/.vscode/
+.agents/

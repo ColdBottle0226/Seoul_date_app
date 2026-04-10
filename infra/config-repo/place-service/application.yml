@@ -1,0 +1,51 @@
+# ============================================================
+# place-service — Nest.js 환경변수 매핑 문서
+# Config Server는 Spring 서비스 전용이므로,
+# Nest.js place-service는 Docker 환경변수로 직접 주입받는다.
+# 이 파일은 참조용 문서입니다.
+# ============================================================
+
+# Node.js / NestJS
+PORT: 8082
+NODE_ENV: production
+
+# MySQL (TypeORM)
+DB_HOST: mysql-place
+DB_PORT: 3306
+DB_DATABASE: place_db
+DB_USERNAME: <MYSQL_USER>
+DB_PASSWORD: <MYSQL_PASSWORD>
+DB_SYNCHRONIZE: "false"      # 프로덕션: 마이그레이션 사용
+DB_LOGGING: "false"
+
+# MongoDB (Mongoose)
+MONGODB_URI: mongodb://<MONGO_USER>:<MONGO_PASSWORD>@mongodb:27017/date_app?authSource=admin
+
+# Elasticsearch
+ELASTICSEARCH_NODE: http://elasticsearch:9200
+ELASTICSEARCH_USERNAME: elastic
+ELASTICSEARCH_PASSWORD: <ELASTIC_PASSWORD>
+
+# Kafka (KafkaJS)
+KAFKA_BROKERS: kafka:9092
+KAFKA_CLIENT_ID: place-service
+KAFKA_GROUP_ID: place-service-group
+
+# MinIO
+MINIO_ENDPOINT: minio
+MINIO_PORT: 9000
+MINIO_USE_SSL: "false"
+MINIO_ACCESS_KEY: <MINIO_ROOT_USER>
+MINIO_SECRET_KEY: <MINIO_ROOT_PASSWORD>
+MINIO_BUCKET_PLACES: places
+MINIO_BUCKET_REVIEWS: reviews
+MINIO_BUCKET_EVENTS: events
+MINIO_BUCKET_USERS: users
+
+# Eureka (eureka-js-client)
+EUREKA_HOST: eureka-server
+EUREKA_PORT: 8761
+
+# Zipkin / OpenTelemetry
+ZIPKIN_URL: http://zipkin:9411/api/v2/spans
+OTEL_SERVICE_NAME: place-service

@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: config-server
+  profiles:
+    active: native
+  cloud:
+    config:
+      server:
+        native:
+          # Docker의 root(/) 경로와 로컬 프로젝트 경로를 모두 포함
+          search-locations: 
+            - "file:/config-repo/{application}"
+            - "file:${user.dir}/infra/config-repo/{application}"
+            - "file:${user.home}/Desktop/workspace/seoul-date-app/infra/config-repo/{application}"
+
+server:
+  port: 8888
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info

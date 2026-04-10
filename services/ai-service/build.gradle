@@ -19,6 +19,10 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    set('springCloudVersion', "2023.0.1")
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
@@ -34,6 +38,13 @@ dependencies {
     // Qdrant (벡터 DB 클라이언트)
     implementation 'io.qdrant:client:1.9.1'
 
+    // Spring Cloud
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+
+    // Micrometer & Zipkin
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
+
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
 
@@ -41,6 +52,16 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka-test'
 }
 
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'ai-service.jar'
 }

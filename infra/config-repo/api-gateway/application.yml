@@ -1,0 +1,227 @@
+# ============================================================
+# API Gateway — Config Server 배포 설정
+# 경로: infra/config-repo/api-gateway/application.yml
+#
+# 이 파일은 Config Server(8888)가 서비스 기동 시 api-gateway에 배포한다.
+# src/main/resources/application.yml의 값을 오버라이드한다.
+#
+# 우선순위: Config Server(이 파일) > 로컬 application.yml
+# ============================================================
+
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  # ----------------------------------------------------------
+  # Redis (Rate Limiter용 Reactive Redis)
+  # ----------------------------------------------------------
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: 6379
+      password: ${SPRING_DATA_REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+          max-wait: -1ms
+
+  cloud:
+    gateway:
+      # Eureka 기반 동적 라우팅 비활성화 (수동 라우팅 우선)
+      discovery:
+        locator:
+          enabled: false
+          lower-case-service-id: true
+
+      routes:
+        # ── [1] user-auth: 인증 공개 엔드포인트 ─────────────────────
+        - id: user-auth
+          uri: lb://user-service
+          predicates:
+            - Path=/api/auth/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userCB
+                fallbackUri: forward:/fallback/user
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 30
+                redis-rate-limiter.burstCapacity: 60
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [2] user-service: 인증 필요 사용자 API ──────────────────
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/users/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: userCB
+                fallbackUri: forward:/fallback/user
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 100
+                redis-rate-limiter.burstCapacity: 200
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [3] place-service (NestJS) ───────────────────────────────
+        - id: place-service
+          uri: lb://place-service
+          predicates:
+            - Path=/api/places/**, /api/events/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: placeCB
+                fallbackUri: forward:/fallback/place
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 200
+                redis-rate-limiter.burstCapacity: 400
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [4] recommendation-service ───────────────────────────────
+        - id: recommendation-service
+          uri: lb://recommendation-service
+          predicates:
+            - Path=/api/recommendations/**, /api/courses/**, /api/feedbacks/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: recCB
+                fallbackUri: forward:/fallback/recommendation
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [5] ai-service ───────────────────────────────────────────
+        - id: ai-service
+          uri: lb://ai-service
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: aiCB
+                fallbackUri: forward:/fallback/ai
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 20
+                redis-rate-limiter.burstCapacity: 40
+                key-resolver: "#{@ipKeyResolver}"
+
+        # ── [6] seoul-data-service ───────────────────────────────────
+        - id: seoul-data-service
+          uri: lb://seoul-data-service
+          predicates:
+            - Path=/api/seoul-data/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: seoulDataCB
+                fallbackUri: forward:/fallback/seoul-data
+            - name: RequestRateLimiter
+              args:
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                key-resolver: "#{@ipKeyResolver}"
+
+# Eureka Client
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE:http://eureka-server:8761/eureka/}
+    registry-fetch-interval-seconds: 5
+  instance:
+    prefer-ip-address: true
+    lease-renewal-interval-in-seconds: 10
+    lease-expiration-duration-in-seconds: 30
+    health-check-url-path: /actuator/health
+    status-page-url-path: /actuator/info
+    metadata-map:
+      zone: local
+
+# Resilience4j Circuit Breaker
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        slow-call-rate-threshold: 80
+        slow-call-duration-threshold: 5s
+        register-health-indicator: true
+    instances:
+      userCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+      placeCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+      recCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 15s
+      aiCB:
+        base-config: default
+        sliding-window-size: 5
+        failure-rate-threshold: 40
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 1
+      seoulDataCB:
+        base-config: default
+        sliding-window-size: 10
+        failure-rate-threshold: 60
+        wait-duration-in-open-state: 20s
+
+  timelimiter:
+    configs:
+      default:
+        cancel-running-future: true
+    instances:
+      userCB:
+        timeout-duration: 5s
+      placeCB:
+        timeout-duration: 3s
+      recCB:
+        timeout-duration: 10s
+      aiCB:
+        timeout-duration: 30s
+      seoulDataCB:
+        timeout-duration: 5s
+
+# Actuator & Tracing
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, gateway, circuitbreakers, prometheus
+  endpoint:
+    health:
+      show-details: always
+  tracing:
+    sampling:
+      probability: 1.0
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://zipkin:9411/api/v2/spans}
+  metrics:
+    tags:
+      application: ${spring.application.name}

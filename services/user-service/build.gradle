@@ -21,6 +21,10 @@ repositories {
     mavenCentral()
 }
 
+ext {
+    set('springCloudVersion', "2023.0.1")
+}
+
 dependencies {
     // Spring Boot
     implementation 'org.springframework.boot:spring-boot-starter-web'
@@ -32,6 +36,13 @@ dependencies {
 
     // MySQL
     runtimeOnly 'com.mysql:mysql-connector-j'
+
+    // Spring Cloud
+    implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+
+    // Micrometer & Zipkin for distributed tracing
+    implementation 'io.micrometer:micrometer-tracing-bridge-brave'
+    implementation 'io.zipkin.reporter2:zipkin-reporter-brave'
 
     // JWT
     implementation 'io.jsonwebtoken:jjwt-api:0.12.5'
@@ -54,6 +65,16 @@ dependencies {
     testImplementation 'com.h2database:h2'
 }
 
+dependencyManagement {
+    imports {
+        mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+    }
+}
+
 tasks.named('test') {
     useJUnitPlatform()
+}
+
+tasks.named('bootJar') {
+    archiveFileName = 'user-service.jar'
 }
