@@ -1,39 +1,46 @@
 package com.seouldate.user.config;
 
+import com.seouldate.user.security.GatewayAuthFilter;
+import jakarta.servlet.DispatcherType;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 
 @Configuration
 @EnableWebSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
+
+    private final GatewayAuthFilter gatewayAuthFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-            // 1. CSRF 비활성화: JWT를 사용하고, 브라우저 세션을 사용하지 않으므로 불필요함
             .csrf(AbstractHttpConfigurer::disable)
-            
-            // 2. HTTP Basic Auth 및 Form 로그인 비활성화 (Gateway가 JWT 검증을 대행하므로)
             .httpBasic(AbstractHttpConfigurer::disable)
             .formLogin(AbstractHttpConfigurer::disable)
-            
-            // 3. 세션 관리: Spring Security에서 세션을 생성하거나 사용하지 않도록 STATELESS 설정
-            .sessionManagement(session -> session
-                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
-            )
-            
-            // 4. 경로별 권한 설정
+            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-            .dispatcherTypeMatchers(jakarta.servlet.DispatcherType.ERROR).permitAll()
-            .requestMatchers("/error").permitAll()
-            .requestMatchers("/api/auth/**", "/actuator/**").permitAll()
-            .anyRequest().authenticated()
-            );
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                .requestMatchers("/error", "/actuator/**").permitAll()
+                .requestMatchers("/api/auth/**").permitAll()
+                .anyRequest().authenticated()
+            )
+            .exceptionHandling(ex -> ex
+                // X-User-Seq 없는 /api/users/** → 401
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED))
+                // Spring Security ACL 위반 → 403
+                .accessDeniedHandler((req, res, e) -> res.setStatus(HttpStatus.FORBIDDEN.value()))
+            )
+            .addFilterBefore(gatewayAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }

@@ -10,12 +10,17 @@ import java.time.LocalDateTime;
 
 /**
  * User 엔티티
+ *
+ * <p>규칙:
+ * <ul>
+ *   <li>상태 변경은 반드시 도메인 메서드를 통해 수행한다 (@Setter 를 외부에서 직접 호출하지 않는다).</li>
+ *   <li>Soft Delete: enabled=false 처리 (탈퇴/정지 통합 관리는 추후 UserStatus enum 으로 분리).</li>
+ * </ul>
  */
 @Entity
 @Table(name = "users")
 @EntityListeners(AuditingEntityListener.class)
 @Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -55,6 +60,18 @@ public class User {
 
     @LastModifiedDate
     private LocalDateTime updatedAt;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 도메인 메서드 (상태 변경은 여기서만)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
+    public void disable() {
+        this.enabled = false;
+    }
 
     public enum AuthProvider {
         EMAIL, KAKAO, NAVER, GOOGLE
