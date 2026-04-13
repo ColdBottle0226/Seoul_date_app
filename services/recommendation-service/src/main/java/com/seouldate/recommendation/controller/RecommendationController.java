@@ -1,7 +1,6 @@
 package com.seouldate.recommendation.controller;
 
 import com.seouldate.recommendation.client.AIServiceClient;
-import com.seouldate.recommendation.client.PlaceServiceClient;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,7 +16,6 @@ import java.util.Map;
 public class RecommendationController {
 
     private final AIServiceClient aiServiceClient;
-    private final PlaceServiceClient placeServiceClient;
 
     @PostMapping
     public ResponseEntity<Map<String, Object>> requestRecommendation(

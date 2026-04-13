@@ -3,9 +3,9 @@ spring:
     name: recommendation-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://mysql-rec:3306/recommendation_db?useUnicode=true&characterEncoding=utf8mb4}
-    username: ${SPRING_DATASOURCE_USERNAME:dateapp}
-    password: ${SPRING_DATASOURCE_PASSWORD:dateapp123}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3308}/recommendation_db?useUnicode=true&characterEncoding=UTF-8}
+    username: ${SPRING_DATASOURCE_USERNAME:${MYSQL_USER:dateapp}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${MYSQL_PASSWORD:dateapp1234!}}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:

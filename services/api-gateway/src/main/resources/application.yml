@@ -35,9 +35,8 @@ spring:
         cors-configurations:
           '[/**]':
             allowedOriginPatterns:
-              - "http://localhost:3000"   # Frontend dev server
-              - "http://localhost:80"
               - "${ALLOWED_ORIGIN:http://localhost:3000}"
+              - "http://localhost:80"
             allowedMethods:
               - GET
               - POST

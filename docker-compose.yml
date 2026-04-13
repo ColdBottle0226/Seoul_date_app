@@ -504,7 +504,7 @@ services:
   #     SPRING_PROFILES_ACTIVE: local
   #     SPRING_CONFIG_IMPORT: "optional:configserver:http://config-server:8888"
   #     EUREKA_CLIENT_SERVICE_URL_DEFAULTZONE: http://eureka-server:8761/eureka/
-  #     SPRING_DATASOURCE_URL: jdbc:mysql://mysql-user:3306/user_db?useUnicode=true&characterEncoding=utf8mb4
+  #     SPRING_DATASOURCE_URL: jdbc:mysql://mysql-user:3306/user_db?useUnicode=true&characterEncoding=UTF-8
   #     SPRING_DATASOURCE_USERNAME: ${MYSQL_USER}
   #     SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD}
   #     SPRING_DATA_REDIS_HOST: redis

@@ -3,9 +3,9 @@ spring:
     name: user-service
 
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://mysql-user:3306/user_db?useUnicode=true&characterEncoding=utf8mb4}
-    username: ${SPRING_DATASOURCE_USERNAME:dateapp}
-    password: ${SPRING_DATASOURCE_PASSWORD:dateapp123}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://${MYSQL_HOST:localhost}:3306/user_db?useUnicode=true&characterEncoding=UTF-8}
+    username: ${SPRING_DATASOURCE_USERNAME:${MYSQL_USER:dateapp}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${MYSQL_PASSWORD:dateapp1234!}}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
@@ -19,7 +19,7 @@ spring:
 
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:redis}
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:}
 

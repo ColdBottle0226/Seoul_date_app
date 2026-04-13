@@ -1,6 +1,5 @@
 package com.seouldate.user.controller;
 
-import com.seouldate.user.util.JwtUtil;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -17,8 +16,6 @@ import java.util.Map;
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {
-
-    private final JwtUtil jwtUtil;
 
     /**
      * JWT 공개키 엔드포인트
