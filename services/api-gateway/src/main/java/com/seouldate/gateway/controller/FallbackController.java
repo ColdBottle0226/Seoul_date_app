@@ -2,7 +2,6 @@ package com.seouldate.gateway.controller;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -18,7 +17,7 @@ import java.util.Map;
 @RequestMapping("/fallback")
 public class FallbackController {
 
-    @GetMapping("/user")
+    @RequestMapping("/user")
     public ResponseEntity<Map<String, Object>> userFallback() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
@@ -28,7 +27,7 @@ public class FallbackController {
                 ));
     }
 
-    @GetMapping("/place")
+    @RequestMapping("/place")
     public ResponseEntity<Map<String, Object>> placeFallback() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
@@ -38,7 +37,7 @@ public class FallbackController {
                 ));
     }
 
-    @GetMapping("/recommendation")
+    @RequestMapping("/recommendation")
     public ResponseEntity<Map<String, Object>> recommendationFallback() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
@@ -48,7 +47,7 @@ public class FallbackController {
                 ));
     }
 
-    @GetMapping("/ai")
+    @RequestMapping("/ai")
     public ResponseEntity<Map<String, Object>> aiFallback() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(
@@ -58,7 +57,7 @@ public class FallbackController {
                 ));
     }
 
-    @GetMapping("/seoul-data")
+    @RequestMapping("/seoul-data")
     public ResponseEntity<Map<String, Object>> seoulDataFallback() {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(Map.of(

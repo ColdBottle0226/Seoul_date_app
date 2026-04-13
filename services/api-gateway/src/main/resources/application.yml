@@ -35,9 +35,8 @@ spring:
         cors-configurations:
           '[/**]':
             allowedOriginPatterns:
-              - "http://localhost:3000"   # Frontend dev server
-              - "http://localhost:80"
               - "${ALLOWED_ORIGIN:http://localhost:3000}"
+              - "http://localhost:80"
             allowedMethods:
               - GET
               - POST
@@ -346,7 +345,7 @@ logging:
     # Reactor Netty HTTP 클라이언트 (다운스트림 호출)
     reactor.netty.http.client: INFO
     # JWT 필터 (DEBUG로 변경 시 토큰 파싱 과정 확인 가능)
-    com.seouldate.gateway: INFO
+    com.seouldate.gateway: DEBUG
     # Resilience4j CB 상태 전이 로그
     io.github.resilience4j: INFO
   pattern:
