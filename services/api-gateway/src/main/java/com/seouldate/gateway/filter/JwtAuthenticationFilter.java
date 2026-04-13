@@ -64,10 +64,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
      * /favicon.ico  : 브라우저 자동 요청
      */
     private static final List<String> WHITELIST = List.of(
-            "/api/auth/",
-            "/actuator/",
-            "/eureka/",
-            "/fallback/",
+            "/api/auth",
+            "/actuator",
+            "/eureka",
+            "/fallback",
             "/favicon.ico"
     );
 
@@ -79,7 +79,7 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
         // 1. Whitelist 경로는 인증 스킵
         if (isWhitelisted(path)) {
-            log.debug("[JWT] Skip auth — Whitelist path: {} {}", method, path);
+            log.info("[JWT] Skip auth — Whitelist path: {} {}", method, path);
             return chain.filter(exchange);
         }
 
