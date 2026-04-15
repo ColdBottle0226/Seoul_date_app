@@ -1,236 +1,236 @@
 package com.seouldate.user.service;
 
-import com.seouldate.user.domain.User;
 import com.seouldate.user.dto.request.auth.*;
-import com.seouldate.user.dto.response.auth.*;
-import com.seouldate.user.exception.*;
-import com.seouldate.user.repository.UserRepository;
-import com.seouldate.user.util.JwtUtil;
+import com.seouldate.user.dto.response.auth.LoginResponse;
+import com.seouldate.user.dto.response.auth.SignupResponse;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.time.LocalDate;
-import java.time.Period;
-import java.time.Duration;
-import java.util.HexFormat;
-
 /**
- * 인증 서비스.
+ * 인증 서비스 (회원가입 / 이메일 인증 / 로그인 / 회원탈퇴)
  *
- * <p>비즈니스 규칙:
- * <ul>
- *   <li>회원가입: 이메일 인증 완료(Redis email:verified) 확인 → 비밀번호 BCrypt 해시 → 저장 → JWT 발급</li>
- *   <li>로그인: 이메일/비밀번호 검증 → JWT 발급 → RefreshToken SHA-256 해시 후 Redis 저장</li>
- *   <li>토큰 재발급: Redis SHA-256 해시 비교 → 새 AccessToken 발급</li>
- *   <li>비밀번호 재설정: 이메일 인증 완료 확인 → 전체 디바이스 로그아웃(Redis rt 전체 삭제)</li>
- * </ul>
+ * ─────────────────────────────────────────────────────────────────────────
+ * TDD 개발 순서 가이드 (Red → Green → Refactor)
+ * ─────────────────────────────────────────────────────────────────────────
+ * 1. [RED]    AuthServiceTest 에서 테스트 메서드를 작성한다.
+ *             아직 구현이 없으므로 테스트는 실패(빨간불)한다.
  *
- * <p>보안 정책:
- * <ul>
- *   <li>BCrypt strength 12 적용 (설정: SecurityConfig)</li>
- *   <li>RefreshToken 원문은 Redis 에 저장하지 않는다 (SHA-256 해시 저장)</li>
- * </ul>
+ * 2. [GREEN]  아래 TODO 를 하나씩 구현하여 테스트를 통과(초록불)시킨다.
+ *             이때 가장 단순한 코드로 테스트만 통과시키면 충분하다.
+ *
+ * 3. [REFACTOR] 테스트가 모두 통과한 상태에서 중복 제거·코드 정리를 한다.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 주요 의존성 힌트
+ * ─────────────────────────────────────────────────────────────────────────
+ * - UserRepository       : DB에서 User 를 조회/저장
+ * - PasswordEncoder      : 비밀번호 단방향 암호화 (BCrypt 사용)
+ *   사용 예: passwordEncoder.encode("rawPassword")
+ *           passwordEncoder.matches("rawPassword", "encodedPassword")
+ *
+ * - JwtUtil              : Access / Refresh Token 생성
+ * - RedisTemplate        : 이메일 인증 코드를 Redis 에 임시 저장
+ *   사용 예: redisTemplate.opsForValue().set(key, value, 5, TimeUnit.MINUTES)
+ *           redisTemplate.opsForValue().get(key)
+ *
+ * - JavaMailSender       : 인증 이메일 발송
+ *
+ * 생성자 주입(@RequiredArgsConstructor)을 사용하므로
+ * 아래 필드를 선언하면 자동으로 주입됩니다:
+ * <pre>
+ *     private final UserRepository userRepository;
+ *     private final PasswordEncoder passwordEncoder;
+ *     private final JwtUtil jwtUtil;
+ *     private final StringRedisTemplate redisTemplate;
+ *     private final JavaMailSender mailSender;
+ * </pre>
  */
-@Slf4j
 @Service
 @RequiredArgsConstructor
-@Transactional
+@Transactional(readOnly = true)
 public class AuthService {
 
-    private static final String KEY_VERIFIED = "email:verified:%s";
-    private static final String KEY_RT       = "rt:%d:%s";
-    private static final Duration RT_TTL     = Duration.ofSeconds(1_209_600); // 14일
-    private static final int MIN_AGE         = 18;
+    // TODO: 필요한 의존성 필드를 선언하세요 (UserRepository, PasswordEncoder, JwtUtil, RedisTemplate, JavaMailSender)
 
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final JwtUtil jwtUtil;
-    private final RedisTemplate<String, String> redisTemplate;
-    private final EmailVerificationService emailVerificationService;
+    // ──────────────────────────────────────────────────────────────────────
+    // 1. 회원가입
+    // ──────────────────────────────────────────────────────────────────────
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 이메일 회원가입
-    // ─────────────────────────────────────────────────────────────────────────
-
+    /**
+     * 회원가입
+     *
+     * <p>처리 순서:
+     * <ol>
+     *   <li>이메일 중복 여부 확인 → 중복이면 DuplicateEmailException</li>
+     *   <li>나이 검증(만 18세 이상) → 미달이면 UnderageUserException</li>
+     *   <li>이메일 인증 완료 여부 확인 → 미완료면 EmailNotVerifiedException
+     *       (Redis에 "verified:{email}" 키가 존재해야 함)</li>
+     *   <li>비밀번호 암호화 후 User 엔티티 생성 & 저장</li>
+     *   <li>Access Token & Refresh Token 발급 후 반환</li>
+     * </ol>
+     *
+     * <p>힌트 — 나이 계산:
+     * <pre>
+     *     int age = Period.between(request.getBirthDate(), LocalDate.now()).getYears();
+     * </pre>
+     *
+     * <p>힌트 — User 생성 (빌더 패턴):
+     * <pre>
+     *     User user = User.builder()
+     *             .email(request.getEmail())
+     *             .password(passwordEncoder.encode(request.getPassword()))
+     *             .nickname(request.getNickname())
+     *             .provider(User.AuthProvider.EMAIL)
+     *             .role(User.UserRole.USER)
+     *             .build();
+     *     userRepository.save(user);
+     * </pre>
+     *
+     * <p>힌트 — @Transactional:
+     * DB 쓰기 작업이 있으므로 이 메서드 위에 {@code @Transactional} 을 추가해야 합니다.
+     * (클래스 레벨은 readOnly=true 로 되어 있으므로 쓰기 메서드에는 별도 선언 필요)
+     */
+    @Transactional
     public SignupResponse signup(SignupRequest request) {
-        verifyEmailCertified(request.getEmail());
-        verifyAge(request.getBirthDate());
-
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new DuplicateEmailException();
-        }
-
-        User user = User.builder()
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .nickname(request.getNickname())
-                .provider(User.AuthProvider.EMAIL)
-                .role(User.UserRole.USER)
-                .build();
-
-        User saved = userRepository.save(user);
-        redisTemplate.delete(String.format(KEY_VERIFIED, request.getEmail()));
-
-        String accessToken  = jwtUtil.generateAccessToken(saved.getId(), saved.getEmail(), saved.getRole().name());
-        String refreshToken = jwtUtil.generateRefreshToken(saved.getId());
-        storeRefreshToken(saved.getId(), "web", refreshToken);
-
-        log.info("[AuthService.signup] userSeq={}", saved.getId());
-        return SignupResponse.builder()
-                .userSeq(saved.getId())
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .build();
+        // TODO: 구현하세요
+        throw new UnsupportedOperationException("signup() 미구현");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 이메일 로그인
-    // ─────────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────
+    // 2. 이메일 인증 — 코드 발송
+    // ──────────────────────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
+    /**
+     * 이메일 인증 코드 발송
+     *
+     * <p>처리 순서:
+     * <ol>
+     *   <li>6자리 랜덤 숫자 코드 생성</li>
+     *   <li>Redis 에 "verify:{type}:{email}" 키로 코드 저장 (TTL 5분)</li>
+     *   <li>해당 이메일로 코드 발송</li>
+     * </ol>
+     *
+     * <p>힌트 — 6자리 랜덤 코드 생성:
+     * <pre>
+     *     String code = String.format("%06d", new Random().nextInt(1_000_000));
+     * </pre>
+     *
+     * <p>힌트 — Redis Key 네이밍 예시:
+     * <pre>
+     *     String key = "verify:" + request.getType() + ":" + request.getEmail();
+     * </pre>
+     *
+     * <p>힌트 — 메일 발송 (SimpleMailMessage):
+     * <pre>
+     *     SimpleMailMessage message = new SimpleMailMessage();
+     *     message.setTo(request.getEmail());
+     *     message.setSubject("[서울데이트] 이메일 인증 코드");
+     *     message.setText("인증 코드: " + code);
+     *     mailSender.send(message);
+     * </pre>
+     */
+    public void sendVerificationEmail(EmailVerifyRequest request) {
+        // TODO: 구현하세요
+        throw new UnsupportedOperationException("sendVerificationEmail() 미구현");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // 3. 이메일 인증 — 코드 확인
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * 이메일 인증 코드 확인
+     *
+     * <p>처리 순서:
+     * <ol>
+     *   <li>Redis 에서 "verify:{type}:{email}" 키로 저장된 코드 조회</li>
+     *   <li>코드가 없거나 불일치 → InvalidVerificationCodeException</li>
+     *   <li>인증 성공 시:
+     *     <ul>
+     *       <li>코드 삭제 (redisTemplate.delete(key))</li>
+     *       <li>SIGNUP 타입이면 "verified:{email}" 키를 Redis 에 저장 (TTL 10분)</li>
+     *     </ul>
+     *   </li>
+     * </ol>
+     *
+     * <p>힌트 — Redis 에서 값 조회:
+     * <pre>
+     *     String saved = redisTemplate.opsForValue().get(key);
+     *     if (saved == null || !saved.equals(request.getCode())) {
+     *         throw new InvalidVerificationCodeException();
+     *     }
+     * </pre>
+     */
+    public void confirmVerificationCode(EmailVerifyConfirmRequest request) {
+        // TODO: 구현하세요
+        throw new UnsupportedOperationException("confirmVerificationCode() 미구현");
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    // 4. 로그인
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * 이메일/비밀번호 로그인
+     *
+     * <p>처리 순서:
+     * <ol>
+     *   <li>이메일로 User 조회 → 없으면 InvalidCredentialsException (보안상 "이메일/비밀번호 오류"로 통일)</li>
+     *   <li>탈퇴 여부 확인 → enabled=false 면 DeletedUserException</li>
+     *   <li>비밀번호 검증 → 불일치 시 InvalidCredentialsException</li>
+     *   <li>Access / Refresh Token 발급</li>
+     *   <li>Refresh Token 을 Redis 에 저장: "refresh:{userId}:{deviceId}" → refreshToken (TTL 7일)</li>
+     *   <li>LoginResponse 반환</li>
+     * </ol>
+     *
+     * <p>힌트 — 비밀번호 검증:
+     * <pre>
+     *     if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+     *         throw new InvalidCredentialsException();
+     *     }
+     * </pre>
+     */
+    @Transactional
     public LoginResponse login(LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(InvalidCredentialsException::new);
-
-        if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new InvalidCredentialsException();
-        }
-        checkUserStatus(user);
-
-        String accessToken  = jwtUtil.generateAccessToken(user.getId(), user.getEmail(), user.getRole().name());
-        String refreshToken = jwtUtil.generateRefreshToken(user.getId());
-        storeRefreshToken(user.getId(), request.getDeviceId(), refreshToken);
-
-        return LoginResponse.builder()
-                .userSeq(user.getId())
-                .accessToken(accessToken)
-                .refreshToken(refreshToken)
-                .profileCompleted(user.isEnabled())
-                .build();
+        // TODO: 구현하세요
+        throw new UnsupportedOperationException("login() 미구현");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 로그아웃
-    // ─────────────────────────────────────────────────────────────────────────
+    // ──────────────────────────────────────────────────────────────────────
+    // 5. 회원탈퇴
+    // ──────────────────────────────────────────────────────────────────────
 
-    public void logout(long userSeq, String deviceId) {
-        redisTemplate.delete(String.format(KEY_RT, userSeq, deviceId));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Access Token 재발급
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public TokenResponse refresh(RefreshRequest request) {
-        long userSeq = jwtUtil.getUserIdFromToken(request.getRefreshToken());
-        String key   = String.format(KEY_RT, userSeq, request.getDeviceId());
-        String stored = redisTemplate.opsForValue().get(key);
-
-        if (stored == null) {
-            throw new InvalidRefreshTokenException();
-        }
-        if (!stored.equals(sha256(request.getRefreshToken()))) {
-            throw new InvalidRefreshTokenException();
-        }
-
-        User user = userRepository.findById(userSeq)
-                .orElseThrow(InvalidRefreshTokenException::new);
-
-        return TokenResponse.builder()
-                .accessToken(jwtUtil.generateAccessToken(user.getId(), user.getEmail(), user.getRole().name()))
-                .build();
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 소셜 로그인 (stub — 실제 구현 시 OAuth2 provider 연동 추가)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public OAuthLoginResponse oauthLogin(String provider, OAuthLoginRequest request) {
-        // TODO: provider 별 OAuth2 인가 코드 교환 로직 구현
-        throw new UnsupportedOperationException("소셜 로그인 미구현");
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 비밀번호 변경 (로그인 상태)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void changePassword(long userSeq, ChangePasswordRequest request) {
-        User user = userRepository.findById(userSeq)
-                .orElseThrow(InvalidCredentialsException::new);
-
-        if (user.getPassword() == null) {
-            throw new InvalidCredentialsException("소셜 전용 계정은 비밀번호 변경이 불가능합니다.");
-        }
-        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPassword())) {
-            throw new InvalidCredentialsException();
-        }
-
-        user.changePassword(passwordEncoder.encode(request.getNewPassword()));
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 비밀번호 재설정 (분실)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    public void resetPassword(ResetPasswordRequest request) {
-        verifyEmailCertified(request.getEmail());
-
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElseThrow(ResourceNotFoundException::new);
-
-        user.changePassword(passwordEncoder.encode(request.getNewPassword()));
-        redisTemplate.delete(String.format(KEY_VERIFIED, request.getEmail()));
-
-        // 전체 디바이스 로그아웃 (rt:{userSeq}:* 패턴 삭제)
-        var keys = redisTemplate.keys(String.format("rt:%d:*", user.getId()));
-        if (keys != null && !keys.isEmpty()) {
-            redisTemplate.delete(keys);
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // private helpers
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private void verifyEmailCertified(String email) {
-        String key   = String.format(KEY_VERIFIED, email);
-        String value = redisTemplate.opsForValue().get(key);
-        if (!"true".equals(value)) {
-            throw new EmailNotVerifiedException();
-        }
-    }
-
-    private void verifyAge(LocalDate birthDate) {
-        if (Period.between(birthDate, LocalDate.now()).getYears() < MIN_AGE) {
-            throw new UnderageUserException();
-        }
-    }
-
-    private void checkUserStatus(User user) {
-        if (!user.isEnabled()) {
-            // enabled=false 는 정지 상태로 간주 (실제 프로젝트에서는 UserStatus enum 권장)
-            throw new SuspendedUserException();
-        }
-    }
-
-    private void storeRefreshToken(long userSeq, String deviceId, String refreshToken) {
-        String key = String.format(KEY_RT, userSeq, deviceId);
-        redisTemplate.opsForValue().set(key, sha256(refreshToken), RT_TTL);
-    }
-
-    private String sha256(String value) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            throw new RuntimeException("SHA-256 해시 실패", e);
-        }
+    /**
+     * 회원탈퇴 (Soft Delete)
+     *
+     * <p>처리 순서:
+     * <ol>
+     *   <li>userId 로 User 조회 → 없으면 ResourceNotFoundException</li>
+     *   <li>비밀번호 재확인 → 불일치 시 InvalidCredentialsException</li>
+     *   <li>user.disable() 호출 (enabled = false)</li>
+     *   <li>Redis 에 저장된 Refresh Token 삭제: "refresh:{userId}:*" 패턴</li>
+     * </ol>
+     *
+     * <p>힌트 — Soft Delete:
+     * DB에서 실제로 삭제하지 않고 enabled=false 로 표시합니다.
+     * 이렇게 하면 탈퇴 이력을 보존하고 재가입 방지 정책도 적용 가능합니다.
+     *
+     * <p>힌트 — 도메인 메서드 사용:
+     * {@code user.disable()} 은 User 엔티티에 이미 정의된 메서드입니다.
+     * @Transactional 이 있으면 변경 감지(Dirty Checking)로 별도 save() 없이도 DB가 업데이트됩니다.
+     *
+     * <p>힌트 — JPA 변경 감지(Dirty Checking) 개념:
+     * JPA 에서 @Transactional 안에서 엔티티 필드를 변경하면,
+     * 트랜잭션이 커밋될 때 자동으로 UPDATE SQL 이 실행됩니다.
+     * 즉, userRepository.save(user) 를 명시적으로 호출하지 않아도 됩니다.
+     *
+     * @param userId   탈퇴 요청 사용자 ID
+     * @param password 확인용 현재 비밀번호
+     */
+    @Transactional
+    public void withdraw(Long userId, String password) {
+        // TODO: 구현하세요
+        throw new UnsupportedOperationException("withdraw() 미구현");
     }
 }

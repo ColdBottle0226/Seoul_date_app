@@ -2,36 +2,35 @@ package com.seouldate.user.controller;
 
 import com.seouldate.user.common.response.ApiResponse;
 import com.seouldate.user.dto.request.auth.*;
-import com.seouldate.user.dto.response.auth.*;
+import com.seouldate.user.dto.response.auth.LoginResponse;
+import com.seouldate.user.dto.response.auth.SignupResponse;
 import com.seouldate.user.service.AuthService;
-import com.seouldate.user.service.EmailVerificationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Map;
-
 /**
- * 인증 컨트롤러 (/api/auth)
+ * 인증 컨트롤러 — 공개(Public) API
  *
- * <p>컨트롤러 책임:
- * <ul>
- *   <li>HTTP 요청/응답 변환</li>
- *   <li>@Valid 입력값 검증 (실패 시 GlobalExceptionHandler 위임)</li>
- *   <li>Gateway 가 주입한 X-User-Seq 헤더를 파라미터로 추출</li>
- * </ul>
- * 비즈니스 로직은 서비스에 위임한다.
+ * <p>경로: {@code /api/auth/**} → SecurityConfig 에서 인증 없이 접근 허용
  *
- * <p>반환 규칙:
- * <ul>
- *   <li>모든 응답은 {@code ResponseEntity<ApiResponse<T>>} 로 통일한다.</li>
- *   <li>성공 데이터 있음 → {@code ResponseEntity.ok(ApiResponse.ok(data))}</li>
- *   <li>201 Created    → {@code ResponseEntity.status(201).body(ApiResponse.created(data))}</li>
- *   <li>204 No Content → {@code ResponseEntity.ok(ApiResponse.noContent())}</li>
- *   <li>실패           → {@link com.seouldate.user.common.exception.GlobalExceptionHandler} 위임</li>
- * </ul>
+ * ─────────────────────────────────────────────────────────────────────────
+ * 컨트롤러 역할 (3가지만 기억하세요)
+ * ─────────────────────────────────────────────────────────────────────────
+ * 1. 요청을 받는다 (@RequestBody, @PathVariable, @RequestHeader 등)
+ * 2. 서비스에 위임한다 (비즈니스 로직은 Service 에 있어야 함)
+ * 3. 응답을 반환한다 (ResponseEntity<ApiResponse<T>>)
+ *
+ * 컨트롤러는 로직이 없고 얇게 유지하는 것이 원칙입니다.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 응답 형식 규칙
+ * ─────────────────────────────────────────────────────────────────────────
+ * - 201 Created  : 새 리소스 생성 → ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.created(data))
+ * - 200 OK       : 조회/처리 성공 → ResponseEntity.ok(ApiResponse.ok(data))
+ * - 204 No Content: 응답 본문 없음 → ResponseEntity.noContent().build()
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -39,85 +38,82 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService authService;
-    private final EmailVerificationService emailVerificationService;
 
-    /** 이메일 인증 코드 발송 */
-    @PostMapping("/email/verify")
-    public ResponseEntity<ApiResponse<Void>> sendEmailVerificationCode(
-            @Valid @RequestBody EmailVerifyRequest request) {
-        emailVerificationService.sendCode(request.getEmail(), request.getType());
-        return ResponseEntity.ok(ApiResponse.noContent());
-    }
-
-    /** 이메일 인증 코드 확인 */
-    @PostMapping("/email/verify/confirm")
-    public ResponseEntity<ApiResponse<Void>> confirmEmailVerificationCode(
-            @Valid @RequestBody EmailVerifyConfirmRequest request) {
-        emailVerificationService.confirmCode(request.getEmail(), request.getCode(), request.getType());
-        return ResponseEntity.ok(ApiResponse.noContent());
-    }
-
-    /** 이메일 회원가입 */
+    /**
+     * 회원가입
+     * POST /api/auth/signup
+     *
+     * <p>힌트:
+     * - @Valid 로 SignupRequest 유효성 검사 활성화
+     * - 성공 시 201 Created + SignupResponse 반환
+     */
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<SignupResponse>> signup(
             @Valid @RequestBody SignupRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                             .body(ApiResponse.created(authService.signup(request)));
+        // TODO: authService.signup(request) 호출 후 201 반환
+        throw new UnsupportedOperationException("signup() 미구현");
     }
 
-    /** 이메일 로그인 */
+    /**
+     * 이메일 인증 코드 발송
+     * POST /api/auth/email/verify
+     *
+     * <p>힌트:
+     * - 성공 시 204 No Content 반환 (응답 본문 없음)
+     */
+    @PostMapping("/email/verify")
+    public ResponseEntity<Void> sendVerificationEmail(
+            @Valid @RequestBody EmailVerifyRequest request) {
+        // TODO: authService.sendVerificationEmail(request) 호출 후 204 반환
+        throw new UnsupportedOperationException("sendVerificationEmail() 미구현");
+    }
+
+    /**
+     * 이메일 인증 코드 확인
+     * POST /api/auth/email/confirm
+     *
+     * <p>힌트:
+     * - 성공 시 204 No Content 반환
+     */
+    @PostMapping("/email/confirm")
+    public ResponseEntity<Void> confirmVerificationCode(
+            @Valid @RequestBody EmailVerifyConfirmRequest request) {
+        // TODO: authService.confirmVerificationCode(request) 호출 후 204 반환
+        throw new UnsupportedOperationException("confirmVerificationCode() 미구현");
+    }
+
+    /**
+     * 로그인
+     * POST /api/auth/login
+     *
+     * <p>힌트:
+     * - 성공 시 200 OK + LoginResponse 반환
+     */
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(
             @Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(authService.login(request)));
+        // TODO: authService.login(request) 호출 후 200 반환
+        throw new UnsupportedOperationException("login() 미구현");
     }
 
-    /** 로그아웃 (X-User-Seq 필수) */
-    @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout(
-            @RequestHeader("X-User-Seq") long userSeq,
-            @Valid @RequestBody LogoutRequest request) {
-        authService.logout(userSeq, request.getDeviceId());
-        return ResponseEntity.ok(ApiResponse.noContent());
-    }
-
-    /** Access Token 재발급 */
-    @PostMapping("/refresh")
-    public ResponseEntity<ApiResponse<TokenResponse>> refresh(
-            @Valid @RequestBody RefreshRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(authService.refresh(request)));
-    }
-
-    /** 소셜 로그인/가입 */
-    @PostMapping("/oauth/{provider}")
-    public ResponseEntity<ApiResponse<OAuthLoginResponse>> oauthLogin(
-            @PathVariable String provider,
-            @Valid @RequestBody OAuthLoginRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(authService.oauthLogin(provider, request)));
-    }
-
-    /** 비밀번호 변경 (로그인 상태) */
-    @PutMapping("/password")
-    public ResponseEntity<ApiResponse<Void>> changePassword(
-            @RequestHeader("X-User-Seq") long userSeq,
-            @Valid @RequestBody ChangePasswordRequest request) {
-        authService.changePassword(userSeq, request);
-        return ResponseEntity.ok(ApiResponse.noContent());
-    }
-
-    /** 비밀번호 재설정 (분실) */
-    @PostMapping("/password/reset")
-    public ResponseEntity<ApiResponse<Void>> resetPassword(
-            @Valid @RequestBody ResetPasswordRequest request) {
-        authService.resetPassword(request);
-        return ResponseEntity.ok(ApiResponse.noContent());
-    }
-
-    /** JWT 공개키 엔드포인트 (Gateway 연동용) */
-    @GetMapping("/public-key")
-    public ResponseEntity<ApiResponse<Map<String, String>>> getPublicKey() {
-        return ResponseEntity.ok(ApiResponse.ok(Map.of(
-                "algorithm", "HMAC-SHA256",
-                "message", "Using shared secret key for JWT validation")));
+    /**
+     * 회원탈퇴
+     * DELETE /api/auth/withdraw
+     *
+     * <p>힌트:
+     * - 인증 헤더에서 X-User-Seq 를 추출하여 userId 로 사용
+     * - 성공 시 204 No Content 반환
+     *
+     * <p>힌트 — 헤더 추출:
+     * <pre>
+     *     @RequestHeader("X-User-Seq") Long userId
+     * </pre>
+     */
+    @DeleteMapping("/withdraw")
+    public ResponseEntity<Void> withdraw(
+            @RequestHeader("X-User-Seq") Long userId,
+            @RequestParam String password) {
+        // TODO: authService.withdraw(userId, password) 호출 후 204 반환
+        throw new UnsupportedOperationException("withdraw() 미구현");
     }
 }

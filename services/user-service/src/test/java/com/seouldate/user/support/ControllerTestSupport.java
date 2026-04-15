@@ -1,103 +1,116 @@
 package com.seouldate.user.support;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.seouldate.user.config.SecurityConfig;
-import com.seouldate.user.security.GatewayAuthFilter;
+import com.seouldate.user.controller.AuthController;
+import com.seouldate.user.controller.UserController;
+import com.seouldate.user.service.AuthService;
+import com.seouldate.user.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.annotation.Import;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
-
-import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 
 /**
- * 컨트롤러 슬라이스 테스트 공통 지원 클래스.
+ * 컨트롤러 테스트 공통 기반 클래스
  *
- * <p>사용법:
- * <pre>{@code
- * @WebMvcTest(AuthController.class)
- * class AuthControllerTest extends ControllerTestSupport {
- *     @MockBean AuthService authService;
- *     ...
- * }
- * }</pre>
+ * ─────────────────────────────────────────────────────────────────────────
+ * @WebMvcTest 란?
+ * ─────────────────────────────────────────────────────────────────────────
+ * Spring MVC 의 웹 레이어(컨트롤러, 필터, 유효성 검사)만 로드하는 슬라이스 테스트입니다.
+ * DB 나 실제 서비스는 로드하지 않아 빠르게 실행됩니다.
  *
- * <p>보안 설정({@link SecurityConfig}, {@link GatewayAuthFilter})을 함께 로드하여
- * X-User-Seq / X-Internal-Service 헤더 검증까지 테스트한다.
+ * 반면 @SpringBootTest 는 전체 애플리케이션 컨텍스트를 로드하므로
+ * 무겁고 느립니다. 컨트롤러 테스트에는 @WebMvcTest 가 적합합니다.
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * @MockBean 이란?
+ * ─────────────────────────────────────────────────────────────────────────
+ * 실제 Service 를 대신하는 가짜(Mock) 객체를 Spring 컨텍스트에 등록합니다.
+ * 테스트에서 이 Mock 의 동작을 직접 지정(stubbing)할 수 있습니다.
+ *
+ * @Mock vs @MockBean 차이:
+ * - @Mock     : Mockito 가 생성. Spring 컨텍스트와 무관 (Service 테스트용)
+ * - @MockBean : Mockito + Spring 컨텍스트에 등록 (Controller 테스트용)
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * MockMvc 란?
+ * ─────────────────────────────────────────────────────────────────────────
+ * 실제 HTTP 서버 없이 컨트롤러를 테스트하는 도구입니다.
+ * perform() → andExpect() 체이닝으로 요청/응답을 검증합니다.
+ *
+ * 기본 사용 패턴:
+ * <pre>
+ *     mockMvc.perform(
+ *             post("/api/auth/signup")
+ *                 .contentType(MediaType.APPLICATION_JSON)
+ *                 .content(objectMapper.writeValueAsString(request))
+ *         )
+ *         .andExpect(status().isCreated())                          // HTTP 상태 코드
+ *         .andExpect(jsonPath("$.success").value(true))            // JSON 필드 검증
+ *         .andExpect(jsonPath("$.data.userSeq").isNumber());       // 숫자 타입 검증
+ * </pre>
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 인증 헤더 추가 방법 (X-User-Seq)
+ * ─────────────────────────────────────────────────────────────────────────
+ * 이 프로젝트는 GatewayAuthFilter 가 X-User-Seq 헤더를 읽어 인증을 처리합니다.
+ * 컨트롤러 테스트에서 인증된 요청을 보내려면 헤더를 직접 추가하세요:
+ * <pre>
+ *     mockMvc.perform(
+ *             get("/api/users/1")
+ *                 .header("X-User-Seq", "1")
+ *                 .header("X-User-Role", "USER")
+ *         )
+ *         .andExpect(status().isOk());
+ * </pre>
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * ObjectMapper 란?
+ * ─────────────────────────────────────────────────────────────────────────
+ * Java 객체 ↔ JSON 문자열 변환 도구입니다.
+ * - 직렬화: objectMapper.writeValueAsString(object) → JSON 문자열
+ * - 역직렬화: objectMapper.readValue(json, Type.class) → Java 객체
+ * 요청 Body 에 담을 JSON 을 생성할 때 사용합니다.
  */
+@WebMvcTest(controllers = {AuthController.class, UserController.class})
 @ActiveProfiles("test")
-@Import({SecurityConfig.class, GatewayAuthFilter.class})
 public abstract class ControllerTestSupport {
 
+    /**
+     * HTTP 요청/응답을 시뮬레이션하는 MockMvc 객체
+     * perform() 메서드로 가상 HTTP 요청을 보냅니다.
+     */
     @Autowired
     protected MockMvc mockMvc;
 
+    /**
+     * Java 객체 ↔ JSON 변환기
+     * objectMapper.writeValueAsString(dto) 로 요청 바디를 만들 때 사용합니다.
+     */
     @Autowired
     protected ObjectMapper objectMapper;
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 공통 헤더 상수
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /** Gateway 가 주입하는 사용자 식별 헤더 */
-    protected static final String HEADER_USER_SEQ  = "X-User-Seq";
-    protected static final String HEADER_USER_ROLE = "X-User-Role";
-
-    /** 내부 서비스 간 통신 헤더 */
-    protected static final String HEADER_INTERNAL_SERVICE = "X-Internal-Service";
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 헬퍼 메서드
-    // ─────────────────────────────────────────────────────────────────────────
+    /**
+     * AuthService 의 Mock 객체
+     * 컨트롤러 테스트에서 실제 DB/Redis 없이 동작을 지정할 수 있습니다.
+     *
+     * 사용 예:
+     * <pre>
+     *     given(authService.signup(any())).willReturn(signupResponse);
+     * </pre>
+     */
+    @MockBean
+    protected AuthService authService;
 
     /**
-     * Gateway 인증 헤더를 생성한다.
+     * UserService 의 Mock 객체
      *
-     * <pre>{@code
-     * mockMvc.perform(get("/api/users/me").headers(authHeader(1001L, "USER")))
-     * }</pre>
+     * 사용 예:
+     * <pre>
+     *     given(userService.getProfile(anyLong(), anyLong())).willReturn(profileResponse);
+     * </pre>
      */
-    protected HttpHeaders authHeader(long userSeq, String role) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HEADER_USER_SEQ, String.valueOf(userSeq));
-        headers.set(HEADER_USER_ROLE, role);
-        return headers;
-    }
-
-    /** 내부 서비스 요청 헤더를 생성한다. */
-    protected HttpHeaders internalHeader(String serviceName) {
-        HttpHeaders headers = new HttpHeaders();
-        headers.set(HEADER_INTERNAL_SERVICE, serviceName);
-        return headers;
-    }
-
-    /** 요청에 JSON Content-Type 과 인증 헤더를 추가한다. */
-    protected MockHttpServletRequestBuilder withAuth(MockHttpServletRequestBuilder request,
-                                                     long userSeq, String role) {
-        return request
-                .headers(authHeader(userSeq, role))
-                .contentType(MediaType.APPLICATION_JSON);
-    }
-
-    /** 요청에 JSON Content-Type 과 내부 서비스 헤더를 추가한다. */
-    protected MockHttpServletRequestBuilder withInternal(MockHttpServletRequestBuilder request,
-                                                         String serviceName) {
-        return request
-                .headers(internalHeader(serviceName))
-                .contentType(MediaType.APPLICATION_JSON);
-    }
-
-    /** 객체를 JSON 문자열로 직렬화한다. */
-    protected String toJson(Object obj) throws Exception {
-        return objectMapper.writeValueAsString(obj);
-    }
-
-    /** ResultActions 에 print() 를 추가하고 반환 (디버깅 편의) */
-    protected ResultActions andPrint(ResultActions actions) throws Exception {
-        return actions.andDo(print());
-    }
+    @MockBean
+    protected UserService userService;
 }
