@@ -1,742 +1,332 @@
 package com.seouldate.user.controller;
 
+import com.seouldate.user.dto.request.auth.ChangePasswordRequest;
+import com.seouldate.user.dto.request.auth.ResetPasswordRequest;
+import com.seouldate.user.dto.request.user.UpdateProfileRequest;
+import com.seouldate.user.dto.response.user.UserProfileResponse;
+import com.seouldate.user.exception.AccessDeniedException;
+import com.seouldate.user.exception.InvalidVerificationCodeException;
+import com.seouldate.user.exception.ResourceNotFoundException;
 import com.seouldate.user.support.ControllerTestSupport;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.http.MediaType;
 
+import java.time.LocalDateTime;
+
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.BDDMockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * UserController 슬라이스 테스트.
+ * UserController 웹 레이어 테스트
  *
- * <p>테스트 범위: HTTP 요청/응답, 입력값 유효성 검증, 에러 코드 매핑
+ * ─────────────────────────────────────────────────────────────────────────
+ * 인증(Authentication) vs 인가(Authorization)
+ * ─────────────────────────────────────────────────────────────────────────
+ * 인증(Authentication): "넌 누구야?" — JWT/헤더로 신원 확인
+ * 인가(Authorization) : "넌 이걸 할 수 있어?" — 권한 확인
  *
- * <p>인증은 Gateway가 처리하고, 하위 서비스는 X-User-Seq / X-User-Role 헤더를 신뢰한다.
- * 따라서 인증 필요 API 테스트는 {@code mockUserHeader()} 헬퍼로 헤더를 수동 주입한다.
+ * 이 프로젝트에서:
+ * - 인증: GatewayAuthFilter 가 X-User-Seq 헤더로 처리 → SecurityContext 설정
+ * - 인가: 서비스 레이어에서 requestUserId == targetUserId 비교
  *
- * <p>설계 문서 참고:
- * <ul>
- *   <li>API 설계서 §3 — 사용자 API /api/users</li>
- *   <li>테이블 설계서 §4-3 ~ §4-9</li>
- * </ul>
+ * ─────────────────────────────────────────────────────────────────────────
+ * 인증 헤더 추가 패턴
+ * ─────────────────────────────────────────────────────────────────────────
+ * /api/users/** 는 인증이 필요합니다.
+ * GatewayAuthFilter 가 X-User-Seq 헤더를 읽어 SecurityContext 를 설정하므로
+ * 테스트에서 이 헤더를 추가해야 인증된 요청으로 처리됩니다.
+ *
+ * <pre>
+ *     mockMvc.perform(
+ *             get("/api/users/1")
+ *                 .header("X-User-Seq", "1")     // 인증된 사용자 ID
+ *                 .header("X-User-Role", "USER") // 역할 (생략 시 USER 기본값)
+ *         )
+ * </pre>
+ *
+ * ─────────────────────────────────────────────────────────────────────────
+ * 403 Forbidden 테스트
+ * ─────────────────────────────────────────────────────────────────────────
+ * 사용자 1이 사용자 2의 정보에 접근하는 경우:
+ * - 서비스에서 AccessDeniedException 발생
+ * - GlobalExceptionHandler 가 403 으로 변환
+ *
+ * <pre>
+ *     given(userService.getProfile(1L, 2L)).willThrow(new AccessDeniedException());
+ *
+ *     mockMvc.perform(
+ *             get("/api/users/2")           // 대상: 사용자 2
+ *                 .header("X-User-Seq", "1") // 요청자: 사용자 1
+ *         )
+ *         .andExpect(status().isForbidden())
+ *         .andExpect(jsonPath("$.code").value("CMN_003"));
+ * </pre>
  */
-// TODO: @MockBean UserService userService;
-// TODO: @MockBean BookmarkService bookmarkService;
-// TODO: @MockBean UserBlockService userBlockService;
-// TODO: @MockBean UserReportService userReportService;
-@WebMvcTest // TODO: @WebMvcTest(UserController.class) 로 변경
 class UserControllerTest extends ControllerTestSupport {
 
-    // =========================================================================
-    // GET /api/users/me — 내 전체 프로필 조회
-    // =========================================================================
+    // ══════════════════════════════════════════════════════════════════════
+    // 1. 회원정보 조회 GET /api/users/{userId}
+    // ══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("GET /api/users/me — 내 전체 프로필 조회")
-    class GetMyProfile {
+    @DisplayName("GET /api/users/{userId} — 회원정보 조회")
+    class GetProfile {
 
         @Test
-        @DisplayName("성공: 프로필 완성 사용자 조회 → 200 + 전체 프로필 반환")
-        void success_profile_completed() throws Exception {
-            // given
-            // TODO: X-User-Seq: 1001, X-User-Role: USER 헤더 설정
-            // TODO: userService.getMyProfile(1001L) 반환값 stubbing (프로필 완성 상태)
+        @DisplayName("성공: 200 OK + 프로필 응답")
+        void getProfile_success() throws Exception {
+            // ── Given ─────────────────────────────────────────────────────
+            // 힌트: userService.getProfile() 이 UserProfileResponse 를 반환하도록 설정
+            //
+            // UserProfileResponse response = UserProfileResponse.builder()
+            //         .id(1L)
+            //         .email("user@example.com")
+            //         .nickname("테스터")
+            //         .createdAt(LocalDateTime.now())
+            //         .build();
+            // given(userService.getProfile(1L, 1L)).willReturn(response);
 
-            // when & then
-            // TODO: GET /api/users/me 요청
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.userSeq").value(1001) 검증
-            // TODO: jsonPath("$.data.profile").exists() 검증
-            // TODO: jsonPath("$.data.profileImages").isArray() 검증
-            // TODO: jsonPath("$.data.interests").isArray() 검증
+            // ── When & Then ───────────────────────────────────────────────
+            // mockMvc.perform(
+            //         get("/api/users/1")
+            //                 .header("X-User-Seq", "1") // 본인 조회
+            //     )
+            //     .andDo(print())
+            //     .andExpect(status().isOk())
+            //     .andExpect(jsonPath("$.success").value(true))
+            //     .andExpect(jsonPath("$.data.id").value(1))
+            //     .andExpect(jsonPath("$.data.email").value("user@example.com"))
+            //     .andExpect(jsonPath("$.data.nickname").value("테스터"));
         }
 
         @Test
-        @DisplayName("성공: 프로필 미완성 사용자 조회 → 200 + profileCmplYn=N")
-        void success_profile_incomplete() throws Exception {
-            // given
-            // TODO: userService.getMyProfile() 반환값 stubbing (profileCmplYn=N)
-
-            // when & then
-            // TODO: jsonPath("$.data.profile.profileCmplYn").value("N") 검증
+        @DisplayName("실패: 타인 프로필 조회 시 403 Forbidden")
+        void getProfile_forbidden() throws Exception {
+            // 힌트: 사용자 1이 사용자 2의 프로필 조회 시도
+            // given(userService.getProfile(1L, 2L)).willThrow(new AccessDeniedException());
+            //
+            // mockMvc.perform(
+            //         get("/api/users/2")           // 대상: 사용자 2
+            //                 .header("X-User-Seq", "1") // 요청자: 사용자 1
+            //     )
+            //     .andExpect(status().isForbidden())
+            //     .andExpect(jsonPath("$.code").value("CMN_003"));
         }
 
         @Test
-        @DisplayName("실패: X-User-Seq 헤더 없음 → 401")
-        void fail_no_auth_header() throws Exception {
-            // given
-            // TODO: 헤더 없이 요청
+        @DisplayName("실패: 존재하지 않는 사용자 조회 시 404 Not Found")
+        void getProfile_notFound() throws Exception {
+            // given(userService.getProfile(99L, 99L)).willThrow(new ResourceNotFoundException());
+            //
+            // mockMvc.perform(
+            //         get("/api/users/99")
+            //                 .header("X-User-Seq", "99")
+            //     )
+            //     .andExpect(status().isNotFound())
+            //     .andExpect(jsonPath("$.code").value("CMN_004"));
+        }
 
-            // when & then
-            // TODO: status().isUnauthorized() 검증
+        @Test
+        @DisplayName("실패: X-User-Seq 헤더 없이 요청하면 401 Unauthorized")
+        void getProfile_unauthenticated() throws Exception {
+            // 힌트: GatewayAuthFilter 와 SecurityConfig 설정에 의해
+            //       X-User-Seq 없이 /api/users/** 에 접근하면 401이 반환됩니다.
+            //
+            // mockMvc.perform(
+            //         get("/api/users/1")
+            //         // X-User-Seq 헤더 없음
+            //     )
+            //     .andExpect(status().isUnauthorized());
         }
     }
 
-    // =========================================================================
-    // PUT /api/users/me — 기본 정보 수정 (닉네임)
-    // =========================================================================
+    // ══════════════════════════════════════════════════════════════════════
+    // 2. 회원정보 수정 PATCH /api/users/{userId}
+    // ══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("PUT /api/users/me — 기본 정보 수정")
-    class UpdateMyBasicInfo {
+    @DisplayName("PATCH /api/users/{userId} — 회원정보 수정")
+    class UpdateProfile {
 
-        @Test
-        @DisplayName("성공: 닉네임 변경 → 200 + 변경된 닉네임 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { nickNm: "뉴채넬" }
-            // TODO: userService.updateBasicInfo() 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.nickNm").value("뉴채넬") 검증
+        private UpdateProfileRequest validRequest() {
+            return UpdateProfileRequest.builder()
+                    .nickname("새닉네임")
+                    .build();
         }
 
         @Test
-        @DisplayName("실패: 닉네임 2자 미만 → 400 CMN_001")
-        void fail_nickname_too_short() throws Exception {
-            // given
-            // TODO: 요청 바디 { nickNm: "A" }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
+        @DisplayName("성공: 204 No Content 반환")
+        void updateProfile_success() throws Exception {
+            // willDoNothing().given(userService).updateProfile(anyLong(), anyLong(), any());
+            //
+            // mockMvc.perform(
+            //         patch("/api/users/1")
+            //                 .header("X-User-Seq", "1")
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(validRequest()))
+            //     )
+            //     .andExpect(status().isNoContent());
         }
 
         @Test
-        @DisplayName("실패: 닉네임 20자 초과 → 400 CMN_001")
-        void fail_nickname_too_long() throws Exception {
-            // given
-            // TODO: 요청 바디 { nickNm: "21자짜리닉네임문자열12345678901" }
+        @DisplayName("실패: 타인 정보 수정 시 403 Forbidden")
+        void updateProfile_forbidden() throws Exception {
+            // willThrow(new AccessDeniedException()).given(userService)
+            //         .updateProfile(eq(1L), eq(2L), any());
+            //
+            // mockMvc.perform(
+            //         patch("/api/users/2")           // 대상: 사용자 2
+            //                 .header("X-User-Seq", "1") // 요청자: 사용자 1
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(validRequest()))
+            //     )
+            //     .andExpect(status().isForbidden());
+        }
 
-            // when & then
-            // TODO: status().isBadRequest() 검증
+        @Test
+        @DisplayName("실패: 닉네임이 비어있으면 400 Bad Request")
+        void updateProfile_blankNickname() throws Exception {
+            // 힌트: @NotBlank 유효성 검사 테스트
+            //
+            // UpdateProfileRequest invalidRequest = UpdateProfileRequest.builder()
+            //         .nickname("")  // 빈 문자열
+            //         .build();
+            //
+            // mockMvc.perform(
+            //         patch("/api/users/1")
+            //                 .header("X-User-Seq", "1")
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(invalidRequest))
+            //     )
+            //     .andExpect(status().isBadRequest());
+        }
+
+        @Test
+        @DisplayName("실패: 닉네임이 1자리면 400 Bad Request")
+        void updateProfile_nicknameTooShort() throws Exception {
+            // UpdateProfileRequest invalidRequest = UpdateProfileRequest.builder()
+            //         .nickname("A")  // 1자 → @Size(min=2) 위반
+            //         .build();
+            //
+            // mockMvc.perform(...)
+            //     .andExpect(status().isBadRequest());
         }
     }
 
-    // =========================================================================
-    // PUT /api/users/me/profile — 상세 프로필 수정
-    // =========================================================================
+    // ══════════════════════════════════════════════════════════════════════
+    // 3. 비밀번호 변경 PATCH /api/users/{userId}/password
+    // ══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("PUT /api/users/me/profile — 상세 프로필 수정")
-    class UpdateMyDetailProfile {
+    @DisplayName("PATCH /api/users/{userId}/password — 비밀번호 변경")
+    class ChangePassword {
 
-        @Test
-        @DisplayName("성공: 전체 필드 입력 → 200 + profileCmplYn=Y 자동 갱신")
-        void success_all_required_fields_filled() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { heightCm, bodyTypeCd, sidoNm, sggNm, jobNm, eduCd, mbtiCd, introCn, smokeCd, drinkCd }
-            // TODO: userService.updateDetailProfile() → profileCmplYn="Y" 반환 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
+        private ChangePasswordRequest validRequest() {
+            return ChangePasswordRequest.builder()
+                    .currentPassword("OldPass1!")
+                    .newPassword("NewPass1!")
+                    .build();
         }
 
         @Test
-        @DisplayName("성공: 필수 항목(heightCm, sidoNm, sggNm, introCn) 중 일부 미입력 → 200 + profileCmplYn=N")
-        void success_required_fields_incomplete() throws Exception {
-            // given
-            // TODO: 요청 바디에서 sidoNm 제외
-            // TODO: userService.updateDetailProfile() → profileCmplYn="N" 반환 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
+        @DisplayName("성공: 204 No Content 반환")
+        void changePassword_success() throws Exception {
+            // willDoNothing().given(userService).changePassword(anyLong(), anyLong(), any());
+            //
+            // mockMvc.perform(
+            //         patch("/api/users/1/password")
+            //                 .header("X-User-Seq", "1")
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(validRequest()))
+            //     )
+            //     .andExpect(status().isNoContent());
         }
 
         @Test
-        @DisplayName("실패: introCn 500자 초과 → 400 CMN_001")
-        void fail_intro_too_long() throws Exception {
-            // given
-            // TODO: 요청 바디 { introCn: 501자 문자열 }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
+        @DisplayName("실패: 타인 비밀번호 변경 시 403 Forbidden")
+        void changePassword_forbidden() throws Exception {
+            // willThrow(new AccessDeniedException()).given(userService)
+            //         .changePassword(eq(1L), eq(2L), any());
+            //
+            // mockMvc.perform(
+            //         patch("/api/users/2/password")
+            //                 .header("X-User-Seq", "1")
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(validRequest()))
+            //     )
+            //     .andExpect(status().isForbidden());
         }
 
         @Test
-        @DisplayName("실패: bodyTypeCd 허용되지 않는 값 → 400 CMN_001")
-        void fail_invalid_body_type_code() throws Exception {
-            // given
-            // TODO: 요청 바디 { bodyTypeCd: "UNKNOWN" }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
+        @DisplayName("실패: 새 비밀번호 형식이 잘못되면 400 Bad Request")
+        void changePassword_invalidNewPassword() throws Exception {
+            // 힌트: @ValidPassword 커스텀 유효성 검사 테스트
+            //
+            // ChangePasswordRequest invalidRequest = ChangePasswordRequest.builder()
+            //         .currentPassword("OldPass1!")
+            //         .newPassword("weakpass")  // 특수문자, 숫자 없음 → @ValidPassword 위반
+            //         .build();
+            //
+            // mockMvc.perform(...)
+            //     .andExpect(status().isBadRequest());
         }
     }
 
-    // =========================================================================
-    // POST /api/users/me/images/presigned-url — Presigned URL 발급
-    // =========================================================================
+    // ══════════════════════════════════════════════════════════════════════
+    // 4. 비밀번호 재설정 POST /api/users/password/reset
+    // ══════════════════════════════════════════════════════════════════════
 
     @Nested
-    @DisplayName("POST /api/users/me/images/presigned-url — Presigned URL 발급")
-    class GetPresignedUrl {
+    @DisplayName("POST /api/users/password/reset — 비밀번호 재설정")
+    class ResetPassword {
 
-        @Test
-        @DisplayName("성공: 유효한 이미지 파일 정보 → 200 + uploadUrl 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { fileName: "profile.jpg", contentType: "image/jpeg" }
-            // TODO: userService.generatePresignedUrl() 반환값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.uploadUrl").exists() 검증
-            // TODO: jsonPath("$.data.objectKey").exists() 검증
-            // TODO: jsonPath("$.data.expiresIn").value(300) 검증
+        private ResetPasswordRequest validRequest() {
+            return ResetPasswordRequest.builder()
+                    .email("user@example.com")
+                    .code("123456")
+                    .newPassword("NewPass1!")
+                    .build();
         }
 
         @Test
-        @DisplayName("실패: 지원하지 않는 contentType → 400")
-        void fail_unsupported_content_type() throws Exception {
-            // given
-            // TODO: 요청 바디 { fileName: "doc.pdf", contentType: "application/pdf" }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-    }
-
-    // =========================================================================
-    // POST /api/users/me/images — 프로필 이미지 등록
-    // =========================================================================
-
-    @Nested
-    @DisplayName("POST /api/users/me/images — 프로필 이미지 등록")
-    class RegisterProfileImage {
-
-        @Test
-        @DisplayName("성공: 이미지 6장 미만일 때 등록 → 201 + imgSeq 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { objectKey: "users/1001/profile_1.jpg", sortOrd: 1 }
-            // TODO: userService.registerProfileImage() 반환값 stubbing
-
-            // when & then
-            // TODO: status().isCreated() 검증
-            // TODO: jsonPath("$.data.imgSeq").isNumber() 검증
-            // TODO: jsonPath("$.data.imgUrl").exists() 검증
+        @DisplayName("성공: 204 No Content 반환")
+        void resetPassword_success() throws Exception {
+            // willDoNothing().given(userService).resetPassword(any());
+            //
+            // mockMvc.perform(
+            //         post("/api/users/password/reset")
+            //                 .contentType(MediaType.APPLICATION_JSON)
+            //                 .content(objectMapper.writeValueAsString(validRequest()))
+            //     )
+            //     .andExpect(status().isNoContent());
         }
 
         @Test
-        @DisplayName("실패: 이미지 6장 초과 시 등록 → 400 USR_010")
-        void fail_image_limit_exceeded() throws Exception {
-            // given
-            // TODO: userService.registerProfileImage() → ProfileImageLimitException 발생 stubbing
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-            // TODO: jsonPath("$.code").value("USR_010") 검증
-        }
-    }
-
-    // =========================================================================
-    // PUT /api/users/me/images/{imgSeq}/main — 대표 이미지 변경
-    // =========================================================================
-
-    @Nested
-    @DisplayName("PUT /api/users/me/images/{imgSeq}/main — 대표 이미지 변경")
-    class SetMainProfileImage {
-
-        @Test
-        @DisplayName("성공: 내 이미지를 대표로 변경 → 200")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: path variable imgSeq = 5
-            // TODO: userService.setMainImage() 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
+        @DisplayName("실패: 인증 코드 만료/불일치 시 401 Unauthorized")
+        void resetPassword_invalidCode() throws Exception {
+            // willThrow(new InvalidVerificationCodeException()).given(userService).resetPassword(any());
+            //
+            // mockMvc.perform(...)
+            //     .andExpect(status().isUnauthorized())
+            //     .andExpect(jsonPath("$.code").value("USR_002"));
         }
 
         @Test
-        @DisplayName("실패: 다른 사용자의 이미지 변경 시도 → 403 CMN_003")
-        void fail_not_owner() throws Exception {
-            // given
-            // TODO: userService.setMainImage() → AccessDeniedException 발생 stubbing
-
-            // when & then
-            // TODO: status().isForbidden() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 존재하지 않는 imgSeq → 404 CMN_004")
-        void fail_image_not_found() throws Exception {
-            // given
-            // TODO: userService.setMainImage() → ResourceNotFoundException 발생 stubbing
-
-            // when & then
-            // TODO: status().isNotFound() 검증
-        }
-    }
-
-    // =========================================================================
-    // DELETE /api/users/me/images/{imgSeq} — 프로필 이미지 삭제
-    // =========================================================================
-
-    @Nested
-    @DisplayName("DELETE /api/users/me/images/{imgSeq} — 프로필 이미지 삭제")
-    class DeleteProfileImage {
-
-        @Test
-        @DisplayName("성공: 내 이미지 삭제 → 204 No Content")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: path variable imgSeq = 5
-            // TODO: userService.deleteProfileImage() 정상 동작 stubbing
-
-            // when & then
-            // TODO: DELETE /api/users/me/images/5 요청
-            // TODO: status().isNoContent() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 다른 사용자의 이미지 삭제 시도 → 403 CMN_003")
-        void fail_not_owner() throws Exception {
-            // given
-            // TODO: userService.deleteProfileImage() → AccessDeniedException 발생 stubbing
-
-            // when & then
-            // TODO: status().isForbidden() 검증
-        }
-    }
-
-    // =========================================================================
-    // POST /api/users/me/interests — 관심사 저장 (전체 교체)
-    // =========================================================================
-
-    @Nested
-    @DisplayName("POST /api/users/me/interests — 관심사 저장")
-    class SaveInterests {
-
-        @Test
-        @DisplayName("성공: 관심사 10개 이하 입력 → 200 + 저장된 관심사 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { interests: ["여행", "영화", "맛집", "운동"] }
-            // TODO: userService.saveInterests() 반환값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.interests").isArray() 검증
-            // TODO: jsonPath("$.data.interests.length()").value(4) 검증
-        }
-
-        @Test
-        @DisplayName("실패: 관심사 10개 초과 → 400 CMN_001")
-        void fail_interests_limit_exceeded() throws Exception {
-            // given
-            // TODO: 요청 바디 { interests: 11개 항목 배열 }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 관심사 항목이 20자 초과 → 400 CMN_001")
-        void fail_interest_item_too_long() throws Exception {
-            // given
-            // TODO: 요청 바디 { interests: ["21자짜리관심사항목입니다123456789"] }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-    }
-
-    // =========================================================================
-    // GET /api/users/me/preferences — 취향 설정 조회
-    // =========================================================================
-
-    @Nested
-    @DisplayName("GET /api/users/me/preferences — 취향 설정 조회")
-    class GetMyPreferences {
-
-        @Test
-        @DisplayName("성공: 취향 설정 존재 → 200 + 설정값 반환")
-        void success_preferences_exist() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: userService.getPreferences(1001L) 반환값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.budgetLvlCd").exists() 검증
-            // TODO: jsonPath("$.data.styleTagVal").isArray() 검증
-        }
-
-        @Test
-        @DisplayName("성공: 취향 설정 미입력 상태 → 200 + 기본값 반환")
-        void success_no_preferences_yet() throws Exception {
-            // given
-            // TODO: userService.getPreferences() 기본값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-        }
-    }
-
-    // =========================================================================
-    // PUT /api/users/me/preferences — 취향 설정 저장/수정
-    // =========================================================================
-
-    @Nested
-    @DisplayName("PUT /api/users/me/preferences — 취향 설정 저장/수정")
-    class UpdateMyPreferences {
-
-        @Test
-        @DisplayName("성공: 취향 설정 저장 → 200")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { budgetLvlCd: "MEDIUM", companionTpCd: "COUPLE", moveTpCd: "TRANSIT", styleTagVal: [...], ... }
-            // TODO: userService.savePreferences() 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-        }
-
-        @Test
-        @DisplayName("실패: budgetLvlCd 허용되지 않는 값 → 400 CMN_001")
-        void fail_invalid_budget_level() throws Exception {
-            // given
-            // TODO: 요청 바디 { budgetLvlCd: "EXTREME" }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-    }
-
-    // =========================================================================
-    // GET /api/users/me/bookmarks — 북마크 목록 조회
-    // =========================================================================
-
-    @Nested
-    @DisplayName("GET /api/users/me/bookmarks — 북마크 목록 조회")
-    class GetMyBookmarks {
-
-        @Test
-        @DisplayName("성공: 전체 타입 북마크 조회 → 200 + 페이지네이션 응답")
-        void success_all_types() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 쿼리 파라미터 page=0, size=20
-            // TODO: bookmarkService.getBookmarks() 반환값 stubbing
-
-            // when & then
-            // TODO: GET /api/users/me/bookmarks?page=0&size=20 요청
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.content").isArray() 검증
-            // TODO: jsonPath("$.data.hasNext").isBoolean() 검증
-        }
-
-        @Test
-        @DisplayName("성공: PLACE 타입만 필터링 조회 → 200")
-        void success_filter_by_type() throws Exception {
-            // given
-            // TODO: 쿼리 파라미터 tgtTpCd=PLACE
-            // TODO: bookmarkService.getBookmarks(tgtTpCd=PLACE) 반환값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-        }
-
-        @Test
-        @DisplayName("실패: tgtTpCd 허용되지 않는 값 → 400")
-        void fail_invalid_target_type() throws Exception {
-            // given
-            // TODO: 쿼리 파라미터 tgtTpCd=INVALID
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-    }
-
-    // =========================================================================
-    // POST /api/users/me/bookmarks — 북마크 추가
-    // =========================================================================
-
-    @Nested
-    @DisplayName("POST /api/users/me/bookmarks — 북마크 추가")
-    class AddBookmark {
-
-        @Test
-        @DisplayName("성공: 신규 북마크 추가 → 201 + bookmarkSeq 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { tgtTpCd: "PLACE", tgtSeq: 200, tgtNm: "카페 드롭탑", thumbImgUrl: "..." }
-            // TODO: bookmarkService.addBookmark() 반환값 stubbing
-
-            // when & then
-            // TODO: status().isCreated() 검증
-            // TODO: jsonPath("$.data.bookmarkSeq").isNumber() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 이미 북마크된 항목 → 409 USR_011")
-        void fail_already_bookmarked() throws Exception {
-            // given
-            // TODO: bookmarkService.addBookmark() → DuplicateBookmarkException 발생 stubbing
-
-            // when & then
-            // TODO: status().isConflict() 검증
-            // TODO: jsonPath("$.code").value("USR_011") 검증
-        }
-    }
-
-    // =========================================================================
-    // DELETE /api/users/me/bookmarks/{bookmarkSeq} — 북마크 삭제
-    // =========================================================================
-
-    @Nested
-    @DisplayName("DELETE /api/users/me/bookmarks/{bookmarkSeq} — 북마크 삭제")
-    class DeleteBookmark {
-
-        @Test
-        @DisplayName("성공: 내 북마크 삭제 → 204 No Content")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: path variable bookmarkSeq = 1
-            // TODO: bookmarkService.deleteBookmark() 정상 동작 stubbing
-
-            // when & then
-            // TODO: DELETE /api/users/me/bookmarks/1 요청
-            // TODO: status().isNoContent() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 존재하지 않는 북마크 → 404 CMN_004")
-        void fail_bookmark_not_found() throws Exception {
-            // given
-            // TODO: bookmarkService.deleteBookmark() → ResourceNotFoundException 발생 stubbing
-
-            // when & then
-            // TODO: status().isNotFound() 검증
-        }
-    }
-
-    // =========================================================================
-    // DELETE /api/users/me — 회원 탈퇴 (Soft Delete)
-    // =========================================================================
-
-    @Nested
-    @DisplayName("DELETE /api/users/me — 회원 탈퇴")
-    class WithdrawUser {
-
-        @Test
-        @DisplayName("성공: 이메일 계정 — 비밀번호 검증 후 탈퇴 → 204 No Content")
-        void success_email_account() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { password: "Passw0rd!", reason: "서비스 미사용" }
-            // TODO: userService.withdraw() 정상 동작 stubbing (del_yn=Y, Redis rt 삭제)
-
-            // when & then
-            // TODO: DELETE /api/users/me 요청
-            // TODO: status().isNoContent() 검증
-        }
-
-        @Test
-        @DisplayName("성공: 소셜 전용 계정 — 비밀번호 없이 탈퇴 → 204 No Content")
-        void success_social_account() throws Exception {
-            // given
-            // TODO: 소셜 계정 사용자 X-User-Seq 헤더 설정
-            // TODO: 요청 바디 { reason: "다른 서비스 이용" } — password 생략
-
-            // when & then
-            // TODO: status().isNoContent() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 이메일 계정에서 비밀번호 불일치 → 401 USR_006")
-        void fail_wrong_password() throws Exception {
-            // given
-            // TODO: userService.withdraw() → InvalidCredentialsException 발생 stubbing
-
-            // when & then
-            // TODO: status().isUnauthorized() 검증
-        }
-    }
-
-    // =========================================================================
-    // GET /api/users/{userSeq} — 특정 사용자 프로필 조회
-    // =========================================================================
-
-    @Nested
-    @DisplayName("GET /api/users/{userSeq} — 특정 사용자 프로필 조회")
-    class GetUserProfile {
-
-        @Test
-        @DisplayName("성공: 공개 프로필 조회 → 200 + 공개 정보만 반환")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq 헤더 설정 (조회하는 사용자)
-            // TODO: path variable userSeq = 1002
-            // TODO: userService.getUserProfile(requestUserSeq=1001, targetUserSeq=1002) 반환값 stubbing
-
-            // when & then
-            // TODO: status().isOk() 검증
-            // TODO: jsonPath("$.data.userSeq").value(1002) 검증
-            // TODO: jsonPath("$.data.profile.gndr").exists() 검증
-            // TODO: 민감 정보(email, passwd) 응답에 미포함 검증
-        }
-
-        @Test
-        @DisplayName("실패: 차단된 사용자 조회 → 404 CMN_004 (존재 노출 방지)")
-        void fail_blocked_user() throws Exception {
-            // given
-            // TODO: userService.getUserProfile() → BlockedUserException 발생 → 404 반환 stubbing
-
-            // when & then
-            // TODO: status().isNotFound() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 탈퇴한 사용자 조회 → 404 CMN_004")
-        void fail_deleted_user() throws Exception {
-            // given
-            // TODO: userService.getUserProfile() → ResourceNotFoundException 발생 stubbing
-
-            // when & then
-            // TODO: status().isNotFound() 검증
-        }
-    }
-
-    // =========================================================================
-    // POST /api/users/{userSeq}/block — 사용자 차단
-    // =========================================================================
-
-    @Nested
-    @DisplayName("POST /api/users/{userSeq}/block — 사용자 차단")
-    class BlockUser {
-
-        @Test
-        @DisplayName("성공: 다른 사용자 차단 → 201")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq: 1001 헤더 설정
-            // TODO: path variable userSeq = 1002
-            // TODO: userBlockService.block(blocker=1001, blocked=1002) 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isCreated() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 자기 자신 차단 → 400 USR_012")
-        void fail_self_block() throws Exception {
-            // given
-            // TODO: X-User-Seq: 1001, path variable userSeq = 1001 (동일)
-            // TODO: userBlockService.block() → SelfBlockException 발생 stubbing
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-            // TODO: jsonPath("$.code").value("USR_012") 검증
-        }
-
-        @Test
-        @DisplayName("실패: 이미 차단된 사용자 → 409 USR_013")
-        void fail_already_blocked() throws Exception {
-            // given
-            // TODO: userBlockService.block() → AlreadyBlockedException 발생 stubbing
-
-            // when & then
-            // TODO: status().isConflict() 검증
-            // TODO: jsonPath("$.code").value("USR_013") 검증
-        }
-    }
-
-    // =========================================================================
-    // DELETE /api/users/{userSeq}/block — 차단 해제
-    // =========================================================================
-
-    @Nested
-    @DisplayName("DELETE /api/users/{userSeq}/block — 차단 해제")
-    class UnblockUser {
-
-        @Test
-        @DisplayName("성공: 차단 해제 → 204 No Content")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq: 1001 헤더 설정
-            // TODO: path variable userSeq = 1002
-            // TODO: userBlockService.unblock() 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isNoContent() 검증
-        }
-
-        @Test
-        @DisplayName("실패: 차단하지 않은 사용자 차단 해제 시도 → 404")
-        void fail_not_blocked() throws Exception {
-            // given
-            // TODO: userBlockService.unblock() → ResourceNotFoundException 발생 stubbing
-
-            // when & then
-            // TODO: status().isNotFound() 검증
-        }
-    }
-
-    // =========================================================================
-    // POST /api/users/{userSeq}/report — 사용자 신고
-    // =========================================================================
-
-    @Nested
-    @DisplayName("POST /api/users/{userSeq}/report — 사용자 신고")
-    class ReportUser {
-
-        @Test
-        @DisplayName("성공: FAKE_PROFILE 사유로 신고 → 201")
-        void success() throws Exception {
-            // given
-            // TODO: X-User-Seq: 1001 헤더 설정
-            // TODO: path variable userSeq = 1002
-            // TODO: 요청 바디 { reportRsn: "FAKE_PROFILE", reportCn: "설명..." }
-            // TODO: userReportService.report() 정상 동작 stubbing
-
-            // when & then
-            // TODO: status().isCreated() 검증
-        }
-
-        @Test
-        @DisplayName("성공: reportCn 없이 신고 (선택 필드) → 201")
-        void success_without_content() throws Exception {
-            // given
-            // TODO: 요청 바디 { reportRsn: "SPAM" } — reportCn 생략
-
-            // when & then
-            // TODO: status().isCreated() 검증
-        }
-
-        @Test
-        @DisplayName("실패: reportRsn 허용되지 않는 값 → 400 CMN_001")
-        void fail_invalid_report_reason() throws Exception {
-            // given
-            // TODO: 요청 바디 { reportRsn: "INVALID_REASON" }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
-        }
-
-        @Test
-        @DisplayName("실패: reportCn 500자 초과 → 400 CMN_001")
-        void fail_report_content_too_long() throws Exception {
-            // given
-            // TODO: 요청 바디 { reportRsn: "SPAM", reportCn: 501자 문자열 }
-
-            // when & then
-            // TODO: status().isBadRequest() 검증
+        @DisplayName("실패: 이메일 형식이 잘못되면 400 Bad Request")
+        void resetPassword_invalidEmail() throws Exception {
+            // ResetPasswordRequest invalidRequest = ResetPasswordRequest.builder()
+            //         .email("not-email")
+            //         .code("123456")
+            //         .newPassword("NewPass1!")
+            //         .build();
+            //
+            // mockMvc.perform(...)
+            //     .andExpect(status().isBadRequest());
         }
     }
 }

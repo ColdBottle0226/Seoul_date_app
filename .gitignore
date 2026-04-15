@@ -41,3 +41,7 @@ logs/
 
 **/.vscode/
 .agents/
+.claude/
+.gemini/
+.cursor/
+.idea/

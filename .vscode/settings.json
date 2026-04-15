@@ -1,8 +1,51 @@
 {
-    "kafka.clusters.selected": "seouloutdate-bG9jYWxob3N0OjkwOTQ",
-    "java.configuration.updateBuildConfiguration": "interactive",
-    "java.import.gradle.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home",
-    "java.jdt.ls.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home",
+    // ============================================================
+    // 팀 공용 Antigravity / VS Code 설정
+    // 개인 JDK 경로는 이 파일에 넣지 않습니다.
+    // JDK가 자동 감지되지 않으면 로컬 JAVA_HOME 환경변수를 설정하세요.
+    // ============================================================
+
+    // Gradle 데몬 실행 JDK — Antigravity 번들 JDK(Java 25) 대신 Java 21 강제 사용
+    "java.import.gradle.java.home": "/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home",
+
+    // Gradle Wrapper 사용 (gradlew 자동 감지 → 팀 공통 Gradle 버전 보장)
     "java.import.gradle.wrapper.enabled": true,
-    "spring-boot.ls.java.home": "/Users/bottlecold/Library/Java/JavaVirtualMachines/openjdk-23/Contents/Home"
+
+    // build.gradle 변경 시 자동으로 프로젝트 재임포트
+    "java.configuration.updateBuildConfiguration": "automatic",
+
+    // Lombok 어노테이션 처리기 활성화 (IDE 레벨)
+    "java.jdt.ls.lombokSupport.enabled": true,
+
+    // null 분석 비활성화 (Lombok 생성 코드에서 오탐 방지)
+    "java.compile.nullAnalysis.mode": "disabled",
+
+    // 멀티모듈: 모든 서브프로젝트를 하나의 워크스페이스로 인식
+    "java.project.referencedLibraries": [
+        "lib/**/*.jar"
+    ],
+
+    // 컴파일러 오류 강조 표시 (Lombok 미처리 전 중간 상태 오류 억제)
+    "java.errors.incompleteClasspath.severity": "warning",
+
+    // 파일 저장 시 자동 정리 (import 정리)
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "never"
+    },
+
+    // Gradle 탭/스페이스 설정
+    "[gradle]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4
+    },
+
+    "[java]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
+
+    // 테스트 실행 설정
+    "java.test.config": {
+        "workingDirectory": "${workspaceFolder}"
+    }
 }

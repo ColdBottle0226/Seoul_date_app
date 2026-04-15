@@ -1,0 +1,2 @@
+// services 그룹 공통 설정
+// 각 서비스는 자신의 build.gradle 에서 개별 설정
