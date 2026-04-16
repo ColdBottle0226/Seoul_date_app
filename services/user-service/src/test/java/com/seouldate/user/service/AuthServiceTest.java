@@ -2,19 +2,13 @@ package com.seouldate.user.service;
 
 import java.time.LocalDate;
 
-<<<<<<< HEAD
 import static org.assertj.core.api.Assertions.assertThat;
-=======
->>>>>>> bff3e29 (회원가입 TDD)
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-<<<<<<< HEAD
-=======
 
 import static org.assertj.core.api.Assertions.*;
->>>>>>> bff3e29 (회원가입 TDD)
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -29,11 +23,8 @@ import com.seouldate.user.domain.User;
 import com.seouldate.user.dto.request.auth.LoginRequest;
 import com.seouldate.user.dto.request.auth.SignupRequest;
 import com.seouldate.user.dto.response.auth.SignupResponse;
-<<<<<<< HEAD
-=======
 import com.seouldate.user.exception.DuplicateEmailException;
 import com.seouldate.user.exception.EmailNotVerifiedException;
->>>>>>> bff3e29 (회원가입 TDD)
 import com.seouldate.user.repository.UserRepository;
 import com.seouldate.user.util.JwtUtil;
 
