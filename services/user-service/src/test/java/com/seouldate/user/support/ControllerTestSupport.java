@@ -73,7 +73,9 @@ import org.springframework.test.web.servlet.MockMvc;
  * - 역직렬화: objectMapper.readValue(json, Type.class) → Java 객체
  * 요청 Body 에 담을 JSON 을 생성할 때 사용합니다.
  */
-@WebMvcTest(controllers = {AuthController.class, UserController.class})
+import org.springframework.boot.autoconfigure.security.servlet.SecurityAutoConfiguration;
+// ...
+@WebMvcTest(excludeAutoConfiguration = {SecurityAutoConfiguration.class})
 @ActiveProfiles("test")
 public abstract class ControllerTestSupport {
 
@@ -113,4 +115,7 @@ public abstract class ControllerTestSupport {
      */
     @MockBean
     protected UserService userService;
+
+    @MockBean
+    protected com.seouldate.user.security.GatewayAuthFilter gatewayAuthFilter;
 }

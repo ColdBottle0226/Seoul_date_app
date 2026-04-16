@@ -1,32 +1,28 @@
 package com.seouldate.user.service;
 
-import com.seouldate.user.domain.User;
-import com.seouldate.user.dto.request.auth.*;
-import com.seouldate.user.dto.response.auth.LoginResponse;
-import com.seouldate.user.dto.response.auth.SignupResponse;
-import com.seouldate.user.exception.*;
-import com.seouldate.user.repository.UserRepository;
-import com.seouldate.user.util.JwtUtil;
+import java.time.LocalDate;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
+import org.mockito.Mockito;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.time.LocalDate;
-import java.util.Optional;
-
-import static org.assertj.core.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
-import static org.mockito.BDDMockito.*;
-import static org.mockito.Mockito.*;
+import com.seouldate.user.domain.User;
+import com.seouldate.user.dto.request.auth.LoginRequest;
+import com.seouldate.user.dto.request.auth.SignupRequest;
+import com.seouldate.user.dto.response.auth.SignupResponse;
+import com.seouldate.user.repository.UserRepository;
+import com.seouldate.user.util.JwtUtil;
 
 /**
  * AuthService 단위 테스트
@@ -105,31 +101,32 @@ import static org.mockito.Mockito.*;
  *         기능별로 테스트를 그룹화하여 가독성을 높입니다.
  *         IntelliJ 에서 실행하면 계층적으로 보입니다.
  */
-@ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
 
-    /** 테스트 대상. @Mock 필드들이 생성자 주입 방식으로 채워집니다. */
-    @InjectMocks
     private AuthService authService;
 
-    // ── 의존성 Mock 객체들 ──────────────────────────────────────────────────
-    @Mock
     private UserRepository userRepository;
-
-    @Mock
     private PasswordEncoder passwordEncoder;
-
-    @Mock
     private JwtUtil jwtUtil;
-
-    @Mock
     private StringRedisTemplate redisTemplate;
-
-    @Mock
-    private ValueOperations<String, String> valueOperations; // redisTemplate.opsForValue() 반환값
-
-    @Mock
+    private ValueOperations<String, String> valueOperations;
     private JavaMailSender mailSender;
+
+    @BeforeEach
+    void globalSetUp() {
+        userRepository = Mockito.mock(UserRepository.class);
+        passwordEncoder = Mockito.mock(PasswordEncoder.class);
+        jwtUtil = Mockito.mock(JwtUtil.class);
+        redisTemplate = Mockito.mock(StringRedisTemplate.class);
+        valueOperations = Mockito.mock(ValueOperations.class);
+        mailSender = Mockito.mock(JavaMailSender.class);
+
+        // Manually instantiate AuthService and inject mocks
+        authService = new AuthService(userRepository, redisTemplate, passwordEncoder, jwtUtil);
+
+        // Configure common mock behaviors
+        given(passwordEncoder.encode(anyString())).willReturn("encodedPassword");
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // 1. 회원가입 (signup)
@@ -149,7 +146,8 @@ class AuthServiceTest {
         @BeforeEach
         void setUp() {
             // 회원가입 객체
-            signupRequest = SignupRequest.builder().email("test@example.com")
+            signupRequest = SignupRequest.builder()
+                    .email("test@example.com")
                     .password("Test1234!")
                     .nickname("테스터명")
                     .gender("M")
@@ -170,10 +168,16 @@ class AuthServiceTest {
             given(valueOperations.get("verified:test@example.com")).willReturn("true");
 
             // 3) 비밀번호 암호화 결과 세팅
-            given(passwordEncoder.encode(signupRequest.getPassword())).willReturn("encodedPassword");
+            assertThat(Mockito.mockingDetails(passwordEncoder).isMock()).isTrue();
+            given(passwordEncoder.encode(anyString())).willReturn("encodedPassword");
 
             // 4) userRepository.save() 가 Domain > User 를 반환하도록 설정
-            User savedUser = User.builder().id(1L).email("test@example.com").build();
+            User savedUser = User.builder()
+                    .id(1L)
+                    .email("test@example.com")
+                    .role(User.UserRole.USER)
+                    .provider(User.AuthProvider.EMAIL)
+                    .build();
             given(userRepository.save(any(User.class))).willReturn(savedUser);
 
             // 5) JWT 토큰 생성 설정 (강제로 기본값 설정)
