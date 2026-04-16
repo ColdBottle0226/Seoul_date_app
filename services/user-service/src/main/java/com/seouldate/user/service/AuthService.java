@@ -1,15 +1,25 @@
 package com.seouldate.user.service;
 
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSender;
+
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.seouldate.user.domain.User;
+import com.seouldate.user.dto.request.auth.EmailVerifyConfirmRequest;
+import com.seouldate.user.dto.request.auth.EmailVerifyRequest;
 import com.seouldate.user.dto.request.auth.SignupRequest;
+import com.seouldate.user.dto.request.auth.VerificationType;
 import com.seouldate.user.dto.response.auth.SignupResponse;
 import com.seouldate.user.exception.DuplicateEmailException;
 import com.seouldate.user.exception.EmailNotVerifiedException;
+import com.seouldate.user.exception.InvalidVerificationCodeException;
 import com.seouldate.user.repository.UserRepository;
 import com.seouldate.user.util.JwtUtil;
 
@@ -23,54 +33,10 @@ import lombok.RequiredArgsConstructor;
  * ───────────────────────────────────────────────────────────────────────── 1.
  * [RED] AuthServiceTest 에서 테스트 메서드를 작성한다. 아직 구현이 없으므로 테스트는 실패(빨간불)한다.
  * ───────────────────────────────────────────────────────────────────────── TDD
- * 개발 순서 가이드 (Red → Green → Refactor)
- * ───────────────────────────────────────────────────────────────────────── 1.
- * [RED] AuthServiceTest 에서 테스트 메서드를 작성한다. 아직 구현이 없으므로 테스트는 실패(빨간불)한다.
- *
- * 2. [GREEN] 아래 TODO 를 하나씩 구현하여 테스트를 통과(초록불)시킨다. 이때 가장 단순한 코드로 테스트만 통과시키면 충분하다.
  * 2. [GREEN] 아래 TODO 를 하나씩 구현하여 테스트를 통과(초록불)시킨다. 이때 가장 단순한 코드로 테스트만 통과시키면 충분하다.
  *
  * 3. [REFACTOR] 테스트가 모두 통과한 상태에서 중복 제거·코드 정리를 한다.
  *
- * ───────────────────────────────────────────────────────────────────────── 주요
- * 의존성 힌트
- * ───────────────────────────────────────────────────────────────────────── -
- * UserRepository : DB에서 User 를 조회/저장 - PasswordEncoder : 비밀번호 단방향 암호화 (BCrypt
- * 사용) 사용 예: passwordEncoder.encode("rawPassword")
- * passwordEncoder.matches("rawPassword", "encodedPassword")
- * ───────────────────────────────────────────────────────────────────────── 주요
- * 의존성 힌트
- * ───────────────────────────────────────────────────────────────────────── -
- * UserRepository : DB에서 User 를 조회/저장 - PasswordEncoder : 비밀번호 단방향 암호화 (BCrypt
- * 사용) 사용 예: passwordEncoder.encode("rawPassword")
- * passwordEncoder.matches("rawPassword", "encodedPassword")
- *
- * - JwtUtil : Access / Refresh Token 생성 - RedisTemplate : 이메일 인증 코드를 Redis 에 임시
- * 저장 사용 예: redisTemplate.opsForValue().set(key, value, 5, TimeUnit.MINUTES)
- * redisTemplate.opsForValue().get(key)
- * - JwtUtil : Access / Refresh Token 생성 - RedisTemplate : 이메일 인증 코드를 Redis 에 임시
- * 저장 사용 예: redisTemplate.opsForValue().set(key, value, 5, TimeUnit.MINUTES)
- * redisTemplate.opsForValue().get(key)
- *
- * - JavaMailSender : 인증 이메일 발송
- * - JavaMailSender : 인증 이메일 발송
- *
- * 생성자 주입(@RequiredArgsConstructor)을 사용하므로 아래 필드를 선언하면 자동으로 주입됩니다:
- *
- * 생성자 주입(@RequiredArgsConstructor)을 사용하므로 아래 필드를 선언하면 자동으로 주입됩니다:
- *
- * <pre>
- * private final UserRepository userRepository;
- * private final PasswordEncoder passwordEncoder;
- * private final JwtUtil jwtUtil;
- * private final StringRedisTemplate redisTemplate;
- * private final JavaMailSender mailSender;
- * private final UserRepository userRepository;
- * private final PasswordEncoder passwordEncoder;
- * private final JwtUtil jwtUtil;
- * private final StringRedisTemplate redisTemplate;
- * private final JavaMailSender mailSender;
- * </pre>
  */
 @Service
 @Transactional(readOnly = true)
@@ -81,6 +47,8 @@ public class AuthService {
     private final StringRedisTemplate redisTemplate;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
+    private final JavaMailSender mailSender;
+
 
     // ──────────────────────────────────────────────────────────────────────
     // 1. 회원가입
@@ -148,43 +116,39 @@ public class AuthService {
     // /**
     //  * 이메일 인증 코드 발송
     //  *
-    //  * <p>
     //  * 처리 순서:
-    //  * <ol>
-    //  * <li>6자리 랜덤 숫자 코드 생성</li>
-    //  * <li>Redis 에 "verify:{type}:{email}" 키로 코드 저장 (TTL 5분)</li>
-    //  * <li>해당 이메일로 코드 발송</li>
-    //  * </ol>
+    //  * 1. 6자리 랜덤 숫자 코드 생성
+    //  * 2. Redis 에 "verify:{type}:{email}" 키로 코드 저장 (TTL 5분)
+    //  * 3. 해당 이메일로 코드 발송
     //  *
-    //  * <p>
-    //  * 힌트 — 6자리 랜덤 코드 생성:
-    //  *
-    //  * <pre>
+    //  * 6자리 랜덤 코드 생성:
     //  * String code = String.format("%06d", new Random().nextInt(1_000_000));
-    //  * </pre>
     //  *
-    //  * <p>
-    //  * 힌트 — Redis Key 네이밍 예시:
-    //  *
-    //  * <pre>
+    //  * Redis Key 네이밍 예시:
     //  * String key = "verify:" + request.getType() + ":" + request.getEmail();
-    //  * </pre>
     //  *
-    //  * <p>
-    //  * 힌트 — 메일 발송 (SimpleMailMessage):
-    //  *
-    //  * <pre>
+    //  * 메일 발송 (SimpleMailMessage):
     //  * SimpleMailMessage message = new SimpleMailMessage();
     //  * message.setTo(request.getEmail());
     //  * message.setSubject("[서울데이트] 이메일 인증 코드");
     //  * message.setText("인증 코드: " + code);
     //  * mailSender.send(message);
-    //  * </pre>
     //  */
-    // public void sendVerificationEmail(EmailVerifyRequest request) {
-    //     // TODO: 구현하세요
-    //     throw new UnsupportedOperationException("sendVerificationEmail() 미구현");
-    // }
+    public void sendVerificationEmail(EmailVerifyRequest request) {
+        // 1. 6자리 랜덤 숫자 코드 생성
+        String code = String.format("%06d", new Random().nextInt(1_000_000));
+
+        // 2. Redis 에 "verify:{type}:{email}" 키로 코드 저장 (TTL 5분)
+        String key = "verify:" + request.getType() + ":" + request.getEmail();
+        redisTemplate.opsForValue().set(key, code, 5, TimeUnit.MINUTES);
+
+        // 3. 해당 이메일로 코드 발송
+        SimpleMailMessage message = new SimpleMailMessage();
+        message.setTo(request.getEmail());
+        message.setSubject("[서울데이트] 이메일 인증 코드");
+        message.setText("인증 코드: " + code);
+        mailSender.send(message);
+    }
 
     // // ──────────────────────────────────────────────────────────────────────
     // // 3. 이메일 인증 — 코드 확인
@@ -192,54 +156,50 @@ public class AuthService {
     // /**
     //  * 이메일 인증 코드 확인
     //  *
-    //  * <p>
     //  * 처리 순서:
-    //  * <ol>
-    //  * <li>Redis 에서 "verify:{type}:{email}" 키로 저장된 코드 조회</li>
-    //  * <li>코드가 없거나 불일치 → InvalidVerificationCodeException</li>
-    //  * <li>인증 성공 시:
-    //  * <ul>
-    //  * <li>코드 삭제 (redisTemplate.delete(key))</li>
-    //  * <li>SIGNUP 타입이면 "verified:{email}" 키를 Redis 에 저장 (TTL 10분)</li>
-    //  * </ul>
-    //  * </li>
-    //  * </ol>
+    //  * 1. Redis 에서 "verify:{type}:{email}" 키로 저장된 코드 조회
+    //  * 2. 코드가 없거나 불일치 → InvalidVerificationCodeException
+    //  * 3. 인증 성공 시:
+    //  * 3-1. 코드 삭제 (redisTemplate.delete(key))
+    //  * 3-2. SIGNUP 타입이면 "verified:{email}" 키를 Redis 에 저장 (TTL 10분)
     //  *
-    //  * <p>
-    //  * 힌트 — Redis 에서 값 조회:
-    //  *
-    //  * <pre>
-    //  * String saved = redisTemplate.opsForValue().get(key);
-    //  * if (saved == null || !saved.equals(request.getCode())) {
-    //  *     throw new InvalidVerificationCodeException();
-    //  * }
-    //  * </pre>
     //  */
-    // public void confirmVerificationCode(EmailVerifyConfirmRequest request) {
-    //     // TODO: 구현하세요
-    //     throw new UnsupportedOperationException("confirmVerificationCode() 미구현");
-    // }
+    public void confirmVerificationCode(EmailVerifyConfirmRequest request){
+        String key = "verify:" + request.getType() + ":" + request.getEmail();
+        String savedCode = redisTemplate.opsForValue().get(key);        
 
+        // 1. 코드가 만료되었거나, 일치하지 않으면 예외 발생
+        if(savedCode == null || !savedCode.equals(request.getCode())){
+            throw new InvalidVerificationCodeException();
+        }
+
+        // 2. 인증요청 번호와 레디스에 저장된 값이 일치하는 경우
+        if(savedCode.equals(request.getCode())){
+            // 인증요청 번호 삭제
+            redisTemplate.opsForValue().getOperations().delete(key);
+
+            // SIGNUP 타입이면 "verified:{email}" 키를 Redis 에 저장 (TTL 10분)
+            if(request.getType() == VerificationType.SIGNUP){
+                redisTemplate.opsForValue().set("verified:" + request.getEmail(), "true", 10, TimeUnit.MINUTES);
+            }
+        }
+    }
     // // ──────────────────────────────────────────────────────────────────────
     // // 4. 로그인
     // // ──────────────────────────────────────────────────────────────────────
     // /**
     //  * 이메일/비밀번호 로그인
     //  *
-    //  * <p>
     //  * 처리 순서:
-    //  * <ol>
-    //  * <li>이메일로 User 조회 → 없으면 InvalidCredentialsException (보안상 "이메일/비밀번호 오류"로
+    //  * 1. 이메일로 User 조회 → 없으면 InvalidCredentialsException (보안상 "이메일/비밀번호 오류"로
     //  * 통일)</li>
-    //  * <li>탈퇴 여부 확인 → enabled=false 면 DeletedUserException</li>
-    //  * <li>비밀번호 검증 → 불일치 시 InvalidCredentialsException</li>
-    //  * <li>Access / Refresh Token 발급</li>
-    //  * <li>Refresh Token 을 Redis 에 저장: "refresh:{userId}:{deviceId}" →
+    //  * 2. 탈퇴 여부 확인 → enabled=false 면 DeletedUserException</li>
+    //  * 3. 비밀번호 검증 → 불일치 시 InvalidCredentialsException</li>
+    //  * 4. Access / Refresh Token 발급</li>
+    //  * 5. Refresh Token 을 Redis 에 저장: "refresh:{userId}:{deviceId}" →
     //  * refreshToken (TTL 7일)</li>
-    //  * <li>LoginResponse 반환</li>
-    //  * </ol>
+    //  * 6. LoginResponse 반환</li>
     //  *
-    //  * <p>
     //  * 힌트 — 비밀번호 검증:
     //  *
     //  * <pre>

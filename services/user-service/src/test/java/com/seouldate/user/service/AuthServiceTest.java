@@ -2,7 +2,6 @@ package com.seouldate.user.service;
 
 import java.time.LocalDate;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -26,7 +25,14 @@ import com.seouldate.user.dto.response.auth.SignupResponse;
 import com.seouldate.user.exception.DuplicateEmailException;
 import com.seouldate.user.exception.EmailNotVerifiedException;
 import com.seouldate.user.repository.UserRepository;
+import com.seouldate.user.dto.request.auth.EmailVerifyConfirmRequest;
+import com.seouldate.user.dto.request.auth.EmailVerifyRequest;
+import com.seouldate.user.dto.request.auth.VerificationType;
+import com.seouldate.user.exception.InvalidVerificationCodeException;
 import com.seouldate.user.util.JwtUtil;
+import org.springframework.mail.SimpleMailMessage;
+import static org.mockito.BDDMockito.then;
+import static org.mockito.ArgumentMatchers.eq;
 
 /**
  * AuthService 단위 테스트
@@ -69,7 +75,6 @@ import com.seouldate.user.util.JwtUtil;
  *
  *       예시:
  * 
- *       <pre>
  *       // userRepository.existsByEmail("test@test.com") 이 true 를 반환하도록 설정
  *       given(userRepository.existsByEmail("test@test.com")).willReturn(true);
  *
@@ -84,7 +89,6 @@ import com.seouldate.user.util.JwtUtil;
  *       AssertJ — assertThat 패턴
  *       ─────────────────────────────────────────────────────────────────────────
  * 
- *       <pre>
  *       // 값 검증
  *       assertThat(result.getUserSeq()).isEqualTo(1L);
  *       assertThat(result.getAccessToken()).isNotBlank();
@@ -97,7 +101,6 @@ import com.seouldate.user.util.JwtUtil;
  *       assertThatThrownBy(() -> authService.signup(request))
  *               .isInstanceOf(DuplicateEmailException.class)
  *               .hasMessageContaining("이미 가입된"); // 선택사항
- *       </pre>
  *
  *       ─────────────────────────────────────────────────────────────────────────
  * @Nested 클래스 — 관련 테스트 그룹화
@@ -126,7 +129,7 @@ class AuthServiceTest {
         mailSender = Mockito.mock(JavaMailSender.class);
 
         // Manually instantiate AuthService and inject mocks
-        authService = new AuthService(userRepository, redisTemplate, passwordEncoder, jwtUtil);
+        authService = new AuthService(userRepository, redisTemplate, passwordEncoder, jwtUtil, mailSender);
 
         // Configure common mock behaviors
         given(passwordEncoder.encode(anyString())).willReturn("encodedPassword");
@@ -245,23 +248,28 @@ class AuthServiceTest {
         @DisplayName("성공: 이메일 인증 코드가 Redis 에 저장되고 메일이 발송된다")
         void sendVerificationEmail_success() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트: Redis valueOperations.set() 호출이 필요합니다.
-            // given(redisTemplate.opsForValue()).willReturn(valueOperations);
-            //
-            // EmailVerifyRequest request = new EmailVerifyRequest("test@example.com",
-            // VerificationType.SIGNUP);
+            // 1) 회원가입 이메일 인증 객체 생성
+            EmailVerifyRequest request = new EmailVerifyRequest("test@example.com", VerificationType.SIGNUP);
+
+            // 2) redis 반환값 설정
+            given(redisTemplate.opsForValue()).willReturn(valueOperations);
+
 
             // ── When ──────────────────────────────────────────────────────
-            // authService.sendVerificationEmail(request);
+            // 3) 인증 요청 시
+            authService.sendVerificationEmail(request);
 
             // ── Then ──────────────────────────────────────────────────────
-            // 힌트: then() 으로 Mock 이 실제로 호출됐는지 검증합니다.
-            // Mockito verify 사용법:
-            // then(valueOperations).should().set(anyString(), anyString(), anyLong(),
-            // any());
-            // then(mailSender).should().send(any(SimpleMailMessage.class));
-            //
-            // 즉, 코드가 Redis 에 저장됐는지, 메일 발송이 됐는지를 검증합니다.
+            // Redis 에 코드가 저장되었는지 검증 (키 패턴: verify:{type}:{email})
+            then(valueOperations).should().set(
+                eq("verify:SIGNUP:test@example.com"),
+                anyString(),
+                anyLong(),
+                any()
+            );
+            
+            // 메일이 실제로 발송되었는지 검증
+            then(mailSender).should().send(any(SimpleMailMessage.class));
         }
     }
 
@@ -277,61 +285,63 @@ class AuthServiceTest {
         @DisplayName("성공: 올바른 코드로 인증하면 Redis 에 인증 완료 키가 저장된다")
         void confirmCode_success() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트:
-            // - Redis 에서 코드 조회 → "123456" 반환
-            // - SIGNUP 타입이므로 인증 완료 키("verified:{email}") 저장 예상
-            //
-            // given(redisTemplate.opsForValue()).willReturn(valueOperations);
-            // given(valueOperations.get("verify:SIGNUP:test@example.com")).willReturn("123456");
-            //
-            // EmailVerifyConfirmRequest request =
-            // new EmailVerifyConfirmRequest("test@example.com", "123456",
-            // VerificationType.SIGNUP);
+            String email = "test@example.com";
+            String code = "123456";
 
+            // 1) 인증 요청 확인 객체
+            EmailVerifyConfirmRequest request = new EmailVerifyConfirmRequest(email, code, VerificationType.SIGNUP);
+
+            // 2) Redis에 저장된 값
+            given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            given(valueOperations.get(eq("verify:SIGNUP:" + email))).willReturn(code);
+        
             // ── When ──────────────────────────────────────────────────────
-            // authService.confirmVerificationCode(request);
+            authService.confirmVerificationCode(request);
 
             // ── Then ──────────────────────────────────────────────────────
-            // 기존 코드 삭제됐는지 검증
-            // then(redisTemplate).should().delete("verify:SIGNUP:test@example.com");
-            //
-            // SIGNUP 이면 인증 완료 키 저장됐는지 검증
-            // then(valueOperations).should().set(eq("verified:test@example.com"),
-            // eq("true"), anyLong(), any());
+            // 기존 코드 삭제 검증
+            then(redisTemplate).should().delete("verify:SIGNUP:" + email);
+            
+            // SIGNUP 타입이면 "verified:{email}" 키가 저장되었는지 검증
+            then(valueOperations).should().set(
+                eq("verified:" + email),
+                eq("true"),
+                anyLong(),
+                any()
+            );
         }
 
         @Test
         @DisplayName("실패: 코드가 만료됐거나 없으면 InvalidVerificationCodeException 이 발생한다")
         void confirmCode_expiredCode() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트: Redis 에서 null 반환 → 코드 만료 또는 미존재
-            // given(redisTemplate.opsForValue()).willReturn(valueOperations);
-            // given(valueOperations.get(anyString())).willReturn(null);
-            //
-            // EmailVerifyConfirmRequest request =
-            // new EmailVerifyConfirmRequest("test@example.com", "123456",
-            // VerificationType.SIGNUP);
+
+            EmailVerifyConfirmRequest request = new EmailVerifyConfirmRequest("test@example.com", "123456", VerificationType.SIGNUP);
+            // 레디스에 인증번호 값이 없다고 가정
+            given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            given(valueOperations.get(anyString())).willReturn(null);
+
 
             // ── When & Then ───────────────────────────────────────────────
-            // assertThatThrownBy(() -> authService.confirmVerificationCode(request))
-            // .isInstanceOf(InvalidVerificationCodeException.class);
+            assertThatThrownBy(() -> authService.confirmVerificationCode(request))
+                .isInstanceOf(InvalidVerificationCodeException.class);
         }
+
 
         @Test
         @DisplayName("실패: 코드가 일치하지 않으면 InvalidVerificationCodeException 이 발생한다")
         void confirmCode_wrongCode() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트: Redis 에서 "654321" 반환, 요청 코드는 "123456"
-            // given(redisTemplate.opsForValue()).willReturn(valueOperations);
-            // given(valueOperations.get(anyString())).willReturn("654321");
-            //
-            // EmailVerifyConfirmRequest request =
-            // new EmailVerifyConfirmRequest("test@example.com", "123456",
-            // VerificationType.SIGNUP);
+            EmailVerifyConfirmRequest request = new EmailVerifyConfirmRequest("test@example.com", "123456", VerificationType.SIGNUP);
+
+            // 일치하지 않는 코드 반환시
+            given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            given(valueOperations.get(anyString())).willReturn("12345");
+
 
             // ── When & Then ───────────────────────────────────────────────
-            // assertThatThrownBy(() -> authService.confirmVerificationCode(request))
-            // .isInstanceOf(InvalidVerificationCodeException.class);
+            assertThatThrownBy(() -> authService.confirmVerificationCode(request))
+            .isInstanceOf(InvalidVerificationCodeException.class);
         }
     }
 
