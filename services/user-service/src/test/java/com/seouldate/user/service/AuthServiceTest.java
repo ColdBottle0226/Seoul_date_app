@@ -7,6 +7,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+
+import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -21,6 +23,8 @@ import com.seouldate.user.domain.User;
 import com.seouldate.user.dto.request.auth.LoginRequest;
 import com.seouldate.user.dto.request.auth.SignupRequest;
 import com.seouldate.user.dto.response.auth.SignupResponse;
+import com.seouldate.user.exception.DuplicateEmailException;
+import com.seouldate.user.exception.EmailNotVerifiedException;
 import com.seouldate.user.repository.UserRepository;
 import com.seouldate.user.util.JwtUtil;
 
@@ -199,54 +203,36 @@ class AuthServiceTest {
         @DisplayName("실패: 이미 가입된 이메일이면 DuplicateEmailException 이 발생한다")
         void signup_duplicateEmail() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트: userRepository.existsByEmail() 가 true 를 반환하도록 설정
-            // given(userRepository.existsByEmail(anyString())).willReturn(true);
+            // existEmail 이 항상 true로 줄때
+            given(userRepository.existsByEmail(anyString())).willReturn(true);
 
             // ── When & Then ───────────────────────────────────────────────
-            // 힌트: assertThatThrownBy 로 예외 발생을 검증합니다.
-            // assertThatThrownBy(() -> authService.signup(validRequest()))
-            // .isInstanceOf(DuplicateEmailException.class);
-        }
-
-        @Test
-        @DisplayName("실패: 만 18세 미만이면 UnderageUserException 이 발생한다")
-        void signup_underageUser() {
-            // ── Given ─────────────────────────────────────────────────────
-            // 힌트: 이메일 중복은 없고, 생일이 최근(미성년)인 요청을 만드세요.
-            // given(userRepository.existsByEmail(anyString())).willReturn(false);
-            //
-            // SignupRequest underageRequest = SignupRequest.builder()
-            // .email("teen@example.com")
-            // .password("Test1234!")
-            // .nickname("미성년")
-            // .gender("M")
-            // .birthDate(LocalDate.now().minusYears(17)) // 만 17세
-            // .build();
-
-            // ── When & Then ───────────────────────────────────────────────
-            // assertThatThrownBy(() -> authService.signup(underageRequest))
-            // .isInstanceOf(UnderageUserException.class);
+            // signup 실행시, DuplicateEmailException 이 발생한다.
+            assertThatThrownBy(() -> authService.signup(signupRequest))
+                            .isInstanceOf(DuplicateEmailException.class);
         }
 
         @Test
         @DisplayName("실패: 이메일 인증을 완료하지 않으면 EmailNotVerifiedException 이 발생한다")
         void signup_emailNotVerified() {
             // ── Given ─────────────────────────────────────────────────────
-            // 힌트:
             // - 이메일 중복 없음, 나이 통과 (1995년생)
             // - Redis 에 인증 키가 없음 (null 반환)
-            //
-            // given(userRepository.existsByEmail(anyString())).willReturn(false);
-            // given(redisTemplate.opsForValue()).willReturn(valueOperations);
-            // given(valueOperations.get("verified:test@example.com")).willReturn(null); //
-            // 인증 안 됨
+            // 1) 이메일 중복 없음
+            given(userRepository.existsByEmail(anyString())).willReturn(false);
+            
+            // 2) Redis 에 인증 키가 없음
+            given(redisTemplate.opsForValue()).willReturn(valueOperations);
+            given(valueOperations.get(anyString())).willReturn(null);
 
             // ── When & Then ───────────────────────────────────────────────
-            // assertThatThrownBy(() -> authService.signup(validRequest()))
-            // .isInstanceOf(EmailNotVerifiedException.class);
+            assertThatThrownBy(() -> authService.signup(signupRequest))
+                .isInstanceOf(EmailNotVerifiedException.class);
         }
     }
 
+
+    
     // ══════════════════════════════════════════════════════════════════════
     // 2. 이메일 인증 코드 발송 (sendVerificationEmail)
     // ══════════════════════════════════════════════════════════════════════
