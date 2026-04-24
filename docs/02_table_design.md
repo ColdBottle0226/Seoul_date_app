@@ -1,7 +1,7 @@
 # Seoul Date App — 테이블 설계서
 
-**문서 버전**: v1.0.0
-**작성일**: 2026-04-13
+**문서 버전**: v2.0.0
+**작성일**: 2026-04-24
 **작성자**: 개발팀
 **대상 DB**: MySQL 8.0 / user_db
 
@@ -121,32 +121,77 @@ tb_user (1) ──── (1) tb_user_profile
 
 ---
 
-### 4-1. tb_user — 사용자 계정
+### 4-1. tb_user — 회원기본
 
-**설명**: 인증 정보만 관리. 프로필·소셜은 별도 테이블로 분리.
+**설명**: 회원기본 정보 관리. 개인정보는 AES-256-GCM 암호화 저장. 이메일 조회는 `email_hash` (SHA-256) 컬럼 전용.
+
+> [!NOTE]
+> **암호화 컬럼 규칙**: `_enc` (AES-256-GCM + Base64), `_hash` (SHA-256 소문자 정규화 후 해시 — 검색/UNIQUE 인덱스용)
 
 | 컬럼명 | 데이터 타입 | NULL | 기본값 | 설명 |
 |---|---|---|---|---|
 | `user_seq` | BIGINT | NOT NULL | AUTO_INCREMENT | 사용자 PK |
-| `email` | VARCHAR(100) | NOT NULL | - | 로그인 이메일 (UNIQUE) |
-| `passwd` | VARCHAR(255) | NULL | - | BCrypt 해시. 소셜 전용 계정은 NULL |
-| `nick_nm` | VARCHAR(50) | NOT NULL | - | 서비스 표시 닉네임 |
-| `user_role` | ENUM | NOT NULL | `USER` | USER=일반 \| ADMIN=관리자 |
-| `user_stt` | ENUM | NOT NULL | `ACTIVE` | ACTIVE=정상 \| SUSPENDED=정지 \| DELETED=탈퇴 |
+| `mbr_mng_no` | VARCHAR(20) | NULL | - | 회원관리번호 (외부 연동용 비즈니스 식별자, UNIQUE) |
+| `mbr_id` | VARCHAR(30) | NULL | - | 회원ID (서비스 로그인 ID, UNIQUE) |
+| `mbr_grd_cd` | VARCHAR(5) | NOT NULL | `REG` | 회원등급코드 (REG=일반 \| GOLD=골드 \| VIP=VIP) |
+| `mbr_nm` | VARCHAR(100) | NULL | - | 회원명 (실명, 선택 입력) |
+| `passwd_enc` | VARCHAR(128) | NULL | - | 비밀번호암호화 (BCrypt 해시. 소셜 전용 계정은 NULL) |
+| `email_enc` | VARCHAR(216) | NULL | - | 이메일주소 암호화 (AES-256-GCM + Base64) |
+| `email_hash` | VARCHAR(64) | NULL | - | 이메일 검색용 해시 (SHA-256, UNIQUE. 이메일 조회/중복체크용) |
+| `join_media_cd` | VARCHAR(2) | NOT NULL | `WB` | 가입매체구분코드 (WB=웹 \| AP=앱 \| KA=카카오 \| NV=네이버 \| GG=구글) |
+| `mbr_tp_cd` | VARCHAR(5) | NOT NULL | `GEN` | 회원유형코드 (GEN=일반 \| ADM=관리자) |
+| `provider_cd` | VARCHAR(10) | NULL | - | 소셜 Provider (EMAIL \| KAKAO \| NAVER \| GOOGLE) |
+| `provider_id` | VARCHAR(255) | NULL | - | 소셜 고유 사용자 ID |
+| `di_enc` | VARCHAR(128) | NULL | - | DI 암호화 (본인인증 Duplication Info, AES-256) |
+| `cert_dt` | DATETIME | NULL | - | 인증일시 (본인인증 완료 일시) |
+| `recom_mbr_id` | VARCHAR(30) | NULL | - | 추천인 회원ID |
+| `recom_dt` | DATETIME | NULL | - | 추천일시 |
+| `mbr_stt_cd` | VARCHAR(5) | NOT NULL | `ACT` | 회원상태코드 (ACT=정상 \| SUS=정지 \| DEL=탈퇴 \| DOR=휴면) |
+| `zip_cd` | VARCHAR(10) | NULL | - | 우편번호 |
+| `addr_base` | VARCHAR(500) | NULL | - | 기본주소 (예: 서울시 강남구 테헤란로 1) |
+| `addr_dtl_enc` | VARCHAR(408) | NULL | - | 상세주소 암호화 (AES-256) |
+| `phone_enc` | VARCHAR(216) | NULL | - | 전화번호 암호화 (AES-256) |
+| `birth_dt_enc` | VARCHAR(128) | NULL | - | 생년월일 암호화 (AES-256). 프로필용 birth_dt는 tb_user_profile에 평문 유지 |
+| `email_rcv_yn` | CHAR(1) | NOT NULL | `N` | 이메일 수신 동의 여부 (Y/N) |
+| `push_rcv_yn` | CHAR(1) | NOT NULL | `N` | Push 수신 동의 여부 (Y/N) |
+| `priv_keep_dt` | DATE | NULL | - | 개인정보보관기간 만료일 |
+| `passwd_chg_dt` | DATETIME | NULL | - | 비밀번호 변경일시 |
+| `long_unused_yn` | CHAR(1) | NOT NULL | `N` | 장기미사용 대상 여부 (Y/N) |
+| `blklist_yn` | CHAR(1) | NOT NULL | `N` | 블랙리스트 여부 (Y/N) |
 | `del_yn` | CHAR(1) | NOT NULL | `N` | Soft Delete 플래그 (N=활성, Y=삭제) |
 | `del_dt` | DATETIME | NULL | - | Soft Delete 시점. 배치 하드 delete 기준 |
-| `reg_dt` | DATETIME | NOT NULL | CURRENT_TIMESTAMP | 등록일시 |
-| `mod_dt` | DATETIME | NOT NULL | CURRENT_TIMESTAMP ON UPDATE | 수정일시 |
+| `reg_dt` | DATETIME | NOT NULL | CURRENT_TIMESTAMP | 최초등록일시 |
+| `mod_dt` | DATETIME | NOT NULL | CURRENT_TIMESTAMP ON UPDATE | 최종수정일시 |
 
 **제약 / 인덱스**
 
-| 종류 | 컬럼 | 이름 |
-|---|---|---|
-| PRIMARY KEY | `user_seq` | - |
-| UNIQUE | `email` | `uq_user_email` |
-| INDEX | `user_stt` | `idx_user_stt` |
-| INDEX | `del_yn` | `idx_user_del_yn` |
-| INDEX | `del_dt` | `idx_user_del_dt` |
+| 종류 | 컬럼 | 이름 | 목적 |
+|---|---|---|---|
+| PRIMARY KEY | `user_seq` | - | - |
+| UNIQUE | `email_hash` | `uq_user_email_hash` | 이메일 중복 방지 / 조회용 |
+| UNIQUE | `mbr_mng_no` | `uq_user_mbr_mng_no` | 회원관리번호 중복 방지 |
+| UNIQUE | `mbr_id` | `uq_user_mbr_id` | 회원ID 중복 방지 |
+| INDEX | `mbr_stt_cd` | `idx_user_mbr_stt_cd` | 상태별 사용자 필터 |
+| INDEX | `del_yn` | `idx_user_del_yn` | Soft Delete 필터 |
+| INDEX | `del_dt` | `idx_user_del_dt` | 배치 하드 delete 기준 |
+| INDEX | `priv_keep_dt` | `idx_user_priv_keep_dt` | 개인정보 보관기간 만료 배치 |
+| INDEX | `long_unused_yn` | `idx_user_long_unused_yn` | 장기미사용 대상 배치 |
+| INDEX | `blklist_yn` | `idx_user_blklist_yn` | 블랙리스트 조회 |
+
+**암호화 / 해시 처리 흐름**
+
+```
+가입 시:
+  1. email → SHA-256 → email_hash (소문자 정규화 후 해시)
+  2. email → AES-256-GCM → email_enc
+  3. password → BCrypt → passwd_enc
+
+이메일 조회:
+  WHERE email_hash = SHA256(lower(input_email))
+
+이메일 복호화 (화면 표시):
+  CryptoUtil.decrypt(email_enc)
+```
 
 **JPA 매핑 가이드**
 ```java
@@ -158,16 +203,21 @@ public class User {
     @Column(name = "user_seq")
     private Long userSeq;
 
-    @Column(name = "del_yn", length = 1)
-    private String delYn = "N";
+    // 이메일 조회는 email_hash 컬럼으로
+    @Column(name = "email_hash", length = 64, unique = true)
+    private String emailHash;
 
-    @Column(name = "del_dt")
-    private LocalDateTime delDt;
+    @Column(name = "email_enc", length = 216)
+    private String emailEnc;
+
+    @Column(name = "del_yn", length = 1)
+    @Builder.Default
+    private String delYn = "N";
 
     public void softDelete() {
         this.delYn = "Y";
         this.delDt = LocalDateTime.now();
-        this.userStt = UserStatus.DELETED;
+        this.mbrSttCd = MbrSttCd.DEL.getCode();
     }
 }
 ```
@@ -409,9 +459,13 @@ INSERT INTO tb_user_interest (user_seq, interest_nm) VALUES (?, ?), (?, ?), ...;
 
 | 테이블 | 인덱스 컬럼 | 목적 |
 |---|---|---|
-| tb_user | `user_stt` | 상태별 사용자 필터 |
+| tb_user | `email_hash` | 이메일 조회/중복체크 (UNIQUE) |
+| tb_user | `mbr_stt_cd` | 상태별 사용자 필터 |
 | tb_user | `del_yn` | Soft Delete 필터 (N=활성) |
 | tb_user | `del_dt` | 배치 하드 delete 기준 범위 스캔 |
+| tb_user | `priv_keep_dt` | 개인정보 보관기간 만료 배치 |
+| tb_user | `long_unused_yn` | 장기미사용 대상 배치 |
+| tb_user | `blklist_yn` | 블랙리스트 조회 |
 | tb_user_profile | `gndr` | 성별 필터 |
 | tb_user_profile | `sgg_nm` | 지역 필터 |
 | tb_user_profile | `mbti_cd` | MBTI 필터 |
@@ -430,7 +484,9 @@ INSERT INTO tb_user_interest (user_seq, interest_nm) VALUES (?, ?), (?, ?), ...;
 
 | 컬럼 | 이유 |
 |---|---|
-| `passwd` | 조회 조건으로 사용 안 함 |
+| `passwd_enc` | 조회 조건으로 사용 안 함 |
+| `email_enc` | 암호화 컬럼은 인덱스 불가 → email_hash 로 대체 |
+| `addr_dtl_enc`, `phone_enc`, `birth_dt_enc` | 암호화 컬럼. 조회 불필요 |
 | `intro_cn` | TEXT 타입. Full-text index 필요 시 별도 검토 |
 | `report_cn` | TEXT 타입 |
 | JSON 컬럼 (`style_tag_val` 등) | MySQL JSON 함수 기반 조회. 필요 시 Generated Column + 인덱스 전환 |
@@ -460,9 +516,9 @@ INSERT INTO tb_user_interest (user_seq, interest_nm) VALUES (?, ?), (?, ?), ...;
 ### 6-2. Soft Delete 처리 순서
 
 ```
-1. del_yn = 'Y'  업데이트
-2. del_dt = NOW() 업데이트
-3. user_stt = 'DELETED' 업데이트
+1. del_yn = 'Y'           업데이트
+2. del_dt = NOW()         업데이트
+3. mbr_stt_cd = 'DEL'    업데이트
 4. Redis rt:{userSeq}:* 전체 삭제 (로그아웃 처리)
 5. [배치] del_dt < NOW() - INTERVAL 30 DAY 조건으로 하드 DELETE
 ```

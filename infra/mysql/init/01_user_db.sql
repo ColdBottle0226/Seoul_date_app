@@ -46,40 +46,101 @@ USE user_db;
 
 
 -- ============================================================
--- 1. tb_user
---    계정 인증 정보 관리. 프로필/소셜은 별도 테이블로 분리.
+-- 1. tb_user (회원기본)
+--    회원 핵심 정보. 개인정보는 AES-256-GCM 암호화 저장.
+--    이메일 조회는 email_hash (SHA-256) 컬럼을 사용.
+--
+--    [암호화 컬럼 규칙]
+--    _enc  : AES-256-GCM 암호화 + Base64 인코딩
+--    _hash : SHA-256 해시 (소문자 정규화 후 해시 — 검색/UNIQUE 인덱스용)
 --
 --    [Soft Delete 전략]
---    del_yn  : 삭제 여부 플래그. 인덱스 활용으로 빠른 필터링.
---    del_dt  : 삭제 시점 기록. 30일 후 하드 delete 배치 처리 기준.
---    user_stt: ACTIVE/SUSPENDED/DELETED 상태 관리.
---              탈퇴(del_yn='Y') 와 별개로 정지(SUSPENDED) 구분 가능.
+--    del_yn     : 삭제 여부 플래그. 인덱스 활용으로 빠른 필터링.
+--    del_dt     : 삭제 시점 기록. 30일 후 배치 하드 delete 기준.
+--    mbr_stt_cd : ACT=정상 | SUS=정지 | DEL=탈퇴 | DOR=휴면
 -- ============================================================
 CREATE TABLE IF NOT EXISTS tb_user
 (
-    user_seq   BIGINT       NOT NULL AUTO_INCREMENT COMMENT '사용자 PK',
-    email      VARCHAR(100) NOT NULL COMMENT '로그인 이메일',
-    passwd     VARCHAR(255)          COMMENT 'BCrypt 해시. 소셜 전용 계정은 NULL',
-    nick_nm    VARCHAR(50)  NOT NULL COMMENT '서비스 표시 닉네임',
-    user_role  ENUM ('USER','ADMIN') NOT NULL DEFAULT 'USER' COMMENT '권한 (USER=일반 | ADMIN=관리자)',
-    user_stt   ENUM ('ACTIVE','SUSPENDED','DELETED') NOT NULL DEFAULT 'ACTIVE'
-        COMMENT '계정 상태 (ACTIVE=정상 | SUSPENDED=정지 | DELETED=탈퇴)',
-    del_yn     CHAR(1)      NOT NULL DEFAULT 'N'
+    -- ── PK ──────────────────────────────────────────────────────────────
+    user_seq        BIGINT        NOT NULL AUTO_INCREMENT COMMENT '사용자 PK',
+
+    -- ── 회원 식별 ────────────────────────────────────────────────────────
+    mbr_mng_no      VARCHAR(20)            COMMENT '회원관리번호 (외부 연동용 비즈니스 식별자, UNIQUE)',
+    mbr_id          VARCHAR(30)            COMMENT '회원ID (서비스 로그인 ID, UNIQUE)',
+    mbr_grd_cd      VARCHAR(5)    NOT NULL DEFAULT 'REG'
+        COMMENT '회원등급코드 (REG=일반 | GOLD=골드 | VIP=VIP)',
+    mbr_nm          VARCHAR(100)           COMMENT '회원명 (실명, 선택 입력)',
+
+    -- ── 인증 정보 (암호화) ───────────────────────────────────────────────
+    passwd_enc      VARCHAR(128)           COMMENT '비밀번호 암호화 (BCrypt 해시). 소셜 전용 계정은 NULL',
+    email_enc       VARCHAR(216)           COMMENT '이메일주소 암호화 (AES-256-GCM + Base64)',
+    email_hash      VARCHAR(64)            COMMENT '이메일 검색용 해시 (SHA-256, 소문자 정규화 후 해시)',
+
+    -- ── 가입 정보 ────────────────────────────────────────────────────────
+    join_media_cd   VARCHAR(2)    NOT NULL DEFAULT 'WB'
+        COMMENT '가입매체구분코드 (WB=웹 | AP=앱 | KA=카카오 | NV=네이버 | GG=구글)',
+    mbr_tp_cd       VARCHAR(5)    NOT NULL DEFAULT 'GEN'
+        COMMENT '회원유형코드 (GEN=일반 | ADM=관리자)',
+
+    -- ── 소셜 OAuth (소셜 연동 상세는 tb_user_social_acnt 로 분리) ────────
+    provider_cd     VARCHAR(10)            COMMENT '소셜 Provider (EMAIL | KAKAO | NAVER | GOOGLE)',
+    provider_id     VARCHAR(255)           COMMENT '소셜 고유 사용자 ID',
+
+    -- ── 본인인증 ─────────────────────────────────────────────────────────
+    di_enc          VARCHAR(128)           COMMENT 'DI 암호화 (본인인증 Duplication Info, AES-256)',
+    cert_dt         DATETIME               COMMENT '인증일시 (본인인증 완료 일시)',
+
+    -- ── 추천인 ───────────────────────────────────────────────────────────
+    recom_mbr_id    VARCHAR(30)            COMMENT '추천인 회원ID',
+    recom_dt        DATETIME               COMMENT '추천일시',
+
+    -- ── 회원 상태 ────────────────────────────────────────────────────────
+    mbr_stt_cd      VARCHAR(5)    NOT NULL DEFAULT 'ACT'
+        COMMENT '회원상태코드 (ACT=정상 | SUS=정지 | DEL=탈퇴 | DOR=휴면)',
+
+    -- ── 주소 (암호화) ────────────────────────────────────────────────────
+    zip_cd          VARCHAR(10)            COMMENT '우편번호',
+    addr_base       VARCHAR(500)           COMMENT '기본주소 (예: 서울시 강남구 테헤란로 1)',
+    addr_dtl_enc    VARCHAR(408)           COMMENT '상세주소 암호화 (예: 101동 202호, AES-256)',
+
+    -- ── 개인정보 (암호화) ────────────────────────────────────────────────
+    phone_enc       VARCHAR(216)           COMMENT '전화번호 암호화 (AES-256)',
+    birth_dt_enc    VARCHAR(128)           COMMENT '생년월일 암호화 (AES-256). 프로필용 birth_dt는 tb_user_profile에 평문 유지',
+
+    -- ── 수신 동의 ────────────────────────────────────────────────────────
+    email_rcv_yn    CHAR(1)       NOT NULL DEFAULT 'N' COMMENT '이메일 수신 동의 여부 (Y/N)',
+    push_rcv_yn     CHAR(1)       NOT NULL DEFAULT 'N' COMMENT 'Push 수신 동의 여부 (Y/N)',
+
+    -- ── 보안 / 정책 ──────────────────────────────────────────────────────
+    priv_keep_dt    DATE                   COMMENT '개인정보보관기간 만료일',
+    passwd_chg_dt   DATETIME               COMMENT '비밀번호 변경일시',
+    long_unused_yn  CHAR(1)       NOT NULL DEFAULT 'N' COMMENT '장기미사용 대상 여부 (Y/N)',
+    blklist_yn      CHAR(1)       NOT NULL DEFAULT 'N' COMMENT '블랙리스트 여부 (Y/N)',
+
+    -- ── Soft Delete ──────────────────────────────────────────────────────
+    del_yn          CHAR(1)       NOT NULL DEFAULT 'N'
         COMMENT 'Soft Delete 플래그 (N=활성, Y=삭제). 인덱스 기반 빠른 필터링',
-    del_dt     DATETIME              NULL
+    del_dt          DATETIME               NULL
         COMMENT 'Soft Delete 시점. NULL=활성. 배치 하드 delete 기준 컬럼',
-    reg_dt     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '등록일시',
-    mod_dt     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '수정일시',
+
+    -- ── 감사 컬럼 ────────────────────────────────────────────────────────
+    reg_dt          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '최초등록일시',
+    mod_dt          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '최종수정일시',
 
     PRIMARY KEY (user_seq),
-    UNIQUE KEY uq_user_email (email),
-    INDEX idx_user_stt (user_stt),
+    UNIQUE KEY uq_user_email_hash (email_hash),
+    UNIQUE KEY uq_user_mbr_mng_no (mbr_mng_no),
+    UNIQUE KEY uq_user_mbr_id (mbr_id),
+    INDEX idx_user_mbr_stt_cd (mbr_stt_cd),
     INDEX idx_user_del_yn (del_yn),
-    INDEX idx_user_del_dt (del_dt)
+    INDEX idx_user_del_dt (del_dt),
+    INDEX idx_user_priv_keep_dt (priv_keep_dt),
+    INDEX idx_user_long_unused_yn (long_unused_yn),
+    INDEX idx_user_blklist_yn (blklist_yn)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4
   COLLATE = utf8mb4_unicode_ci
-    COMMENT = '사용자 계정 (인증 정보)';
+    COMMENT = '회원기본 (인증 정보 + 암호화된 개인정보)';
 
 
 -- ============================================================
