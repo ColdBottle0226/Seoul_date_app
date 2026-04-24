@@ -21,11 +21,11 @@ RAG(Retrieval-Augmented Generation) 기반 LLM이 개인화된 데이트 코스�
 | 서비스 | 포트 | 언어/프레임워크 | 역할 |
 |---|---|---|---|
 | frontend | 3000 | Next.js 15 / TypeScript | UI, SSR |
-| api-gateway | 3001 | NestJS / TypeScript | JWT 인증, 라우팅, Rate Limit |
+| api-gateway | 3001 | Spring Cloud | JWT 인증, 라우팅, Rate Limit |
 | user-service | 8081 | Spring Boot 3.2 / Java 21 | 회원, JWT 발급, OAuth |
 | place-service | 8082 | Spring Boot 3.2 / Java 21 | 장소 CRUD, 이미지, ES 검색 |
 | recommendation-service | 8083 | Spring Boot 3.2 / Java 21 | 코스 추천 요청, 피드백 |
-| ai-service | 8084 | Spring Boot 3.2 / Java 21 | RAG 파이프라인, LLM 호출 |
+| ai-service | 8084 | NestJS / TypeScript | RAG 파이프라인, LLM 호출 |
 | seoul-data-service | 8085 | Spring Boot 3.2 / Java 21 | 공공데이터 수집, Kafka 발행 |
 
 ### Infrastructure Services
@@ -156,7 +156,7 @@ course_pattern_vectors — 코스 패턴 임베딩 (개인화 학습용)
 
 ---
 
-### 4-6. api-gateway (port 3001, NestJS)
+### 4-6. api-gateway (port 3001, Spring Cloud)
 
 **담당 기능**
 - JWT 검증 (user-service 공개키 엔드포인트 캐시)
