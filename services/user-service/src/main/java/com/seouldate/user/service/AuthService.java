@@ -21,6 +21,7 @@ import com.seouldate.user.exception.DuplicateEmailException;
 import com.seouldate.user.exception.EmailNotVerifiedException;
 import com.seouldate.user.exception.InvalidVerificationCodeException;
 import com.seouldate.user.repository.UserRepository;
+import com.seouldate.user.util.CryptoUtil;
 import com.seouldate.user.util.JwtUtil;
 
 import lombok.RequiredArgsConstructor;
@@ -48,6 +49,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
     private final JavaMailSender mailSender;
+    private final CryptoUtil cryptoUtil;
 
 
     // ──────────────────────────────────────────────────────────────────────
@@ -70,40 +72,51 @@ public class AuthService {
     // 1) 회원가입
     @Transactional
     public SignupResponse signup(SignupRequest request) {
-        
-        // 1-1) 이메일 중복 체크
-        if(userRepository.existsByEmail(request.getEmail())){
+
+        // 1-1) 이메일 해시 생성 (암호화 전 SHA-256 해시 — 중복 체크 및 조회용)
+        String emailHash = cryptoUtil.hash(request.getEmail());
+
+        // 1-2) 이메일 중복 체크 (hash 컬럼 기준)
+        if (userRepository.existsByEmailHash(emailHash)) {
             throw new DuplicateEmailException();
         }
 
-        // 1-2) 이메일 인증 확인 레디스 키("verified:{email}")
+        // 1-3) 이메일 인증 완료 여부 확인 (Redis 키: "verified:{email}")
         String verified = redisTemplate.opsForValue().get("verified:" + request.getEmail());
-        if(verified == null || !verified.equals("true")){
+        if (verified == null || !verified.equals("true")) {
             throw new EmailNotVerifiedException("이메일 인증이 필요합니다.");
         }
 
-        // 1-3) 비밀번호 암호화
+        // 1-4) 이메일 AES-256 암호화
+        String emailEnc = cryptoUtil.encrypt(request.getEmail());
+
+        // 1-5) 비밀번호 BCrypt 해시
         String encodedPassword = passwordEncoder.encode(request.getPassword());
 
-        // 1-4) SignupRequest → User 변환
+        // 1-6) SignupRequest → User 변환
         User user = User.builder()
-                .email(request.getEmail())
-                .password(encodedPassword)
-                .nickname(request.getNickname())
-                .provider(User.AuthProvider.EMAIL)
-                .role(User.UserRole.USER)
+                .emailEnc(emailEnc)
+                .emailHash(emailHash)
+                .passwdEnc(encodedPassword)
+                .mbrNm(request.getMbrNm())
+                .joinMediaCd(request.getJoinMediaCd() != null ? request.getJoinMediaCd() : "WB")
+                .mbrTpCd("GEN")
+                .mbrGrdCd("REG")
+                .providerCd(User.AuthProvider.EMAIL)
+                .emailRcvYn(Boolean.TRUE.equals(request.getEmailRcvYn()) ? "Y" : "N")
+                .pushRcvYn(Boolean.TRUE.equals(request.getPushRcvYn()) ? "Y" : "N")
                 .build();
 
-        // 1-5) User 저장
-        User savedUser = userRepository.save(user); 
+        // 1-7) User 저장
+        User savedUser = userRepository.save(user);
 
-        // 1-6) 토큰 발급
-        String accessToken = jwtUtil.generateAccessToken(savedUser.getId(), savedUser.getEmail(),
-                savedUser.getRole().name());
-        String refreshToken = jwtUtil.generateRefreshToken(savedUser.getId());
+        // 1-8) 토큰 발급 (userSeq 기반)
+        String accessToken = jwtUtil.generateAccessToken(savedUser.getUserSeq(), request.getEmail(),
+                savedUser.getMbrTpCd());
+        String refreshToken = jwtUtil.generateRefreshToken(savedUser.getUserSeq());
 
         return SignupResponse.builder()
-                .userSeq(savedUser.getId())
+                .userSeq(savedUser.getUserSeq())
                 .accessToken(accessToken)
                 .refreshToken(refreshToken)
                 .build();

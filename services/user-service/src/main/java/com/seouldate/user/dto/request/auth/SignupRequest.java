@@ -16,6 +16,8 @@ import java.time.LocalDate;
 @NoArgsConstructor
 public class SignupRequest {
 
+    // ── 필수 항목 ──────────────────────────────────────────────────────────
+
     @NotBlank
     @Email
     private String email;
@@ -35,12 +37,34 @@ public class SignupRequest {
     @NotNull
     private LocalDate birthDate;
 
+    // ── 선택 항목 ──────────────────────────────────────────────────────────
+
+    /** 회원명 (실명, 선택 입력) */
+    @Size(max = 100, message = "회원명은 최대 100자입니다.")
+    private String mbrNm;
+
+    /** 가입매체구분코드 (예: WB=웹, AP=앱). 미입력 시 'WB' 기본값 적용. */
+    @Pattern(regexp = "^(WB|AP|KA|NV|GG)?$", message = "가입매체구분코드가 올바르지 않습니다.")
+    private String joinMediaCd;
+
+    /** 이메일 수신 동의 여부 */
+    private Boolean emailRcvYn;
+
+    /** Push 수신 동의 여부 */
+    private Boolean pushRcvYn;
+
     @Builder
-    public SignupRequest(String email, String password, String nickname, String gender, LocalDate birthDate) {
+    public SignupRequest(String email, String password, String nickname, String gender,
+                         LocalDate birthDate, String mbrNm, String joinMediaCd,
+                         Boolean emailRcvYn, Boolean pushRcvYn) {
         this.email = email;
         this.password = password;
         this.nickname = nickname;
         this.gender = gender;
         this.birthDate = birthDate;
+        this.mbrNm = mbrNm;
+        this.joinMediaCd = joinMediaCd;
+        this.emailRcvYn = emailRcvYn;
+        this.pushRcvYn = pushRcvYn;
     }
 }

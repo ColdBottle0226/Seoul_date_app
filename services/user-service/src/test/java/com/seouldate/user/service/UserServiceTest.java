@@ -82,10 +82,10 @@ class UserServiceTest {
         @BeforeEach
         void setUp() {
             testUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .nickname("테스터")
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .emailEnc("encryptedEmail")
+                    .mbrNm("테스터")
                     .build();
         }
 
@@ -146,10 +146,9 @@ class UserServiceTest {
         @BeforeEach
         void setUp() {
             testUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .password("oldEncodedPassword")
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .passwdEnc("oldEncodedPassword")
                     .build();
 
             validRequest = ChangePasswordRequest.builder()
@@ -209,10 +208,9 @@ class UserServiceTest {
         @BeforeEach
         void setUp() {
             testUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .password("oldEncodedPassword")
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .passwdEnc("oldEncodedPassword")
                     .build();
 
             validRequest = ResetPasswordRequest.builder()
@@ -281,10 +279,9 @@ class UserServiceTest {
         @BeforeEach
         void setUp() {
             testUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .nickname("기존닉네임")
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .mbrNm("기존닉네임")
                     .build();
 
             validRequest = UpdateProfileRequest.builder()

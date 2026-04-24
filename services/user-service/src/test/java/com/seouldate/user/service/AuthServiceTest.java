@@ -2,37 +2,38 @@ package com.seouldate.user.service;
 
 import java.time.LocalDate;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
-
-import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import org.mockito.Mockito;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 import com.seouldate.user.domain.User;
+import com.seouldate.user.dto.request.auth.EmailVerifyConfirmRequest;
+import com.seouldate.user.dto.request.auth.EmailVerifyRequest;
 import com.seouldate.user.dto.request.auth.LoginRequest;
 import com.seouldate.user.dto.request.auth.SignupRequest;
+import com.seouldate.user.dto.request.auth.VerificationType;
 import com.seouldate.user.dto.response.auth.SignupResponse;
 import com.seouldate.user.exception.DuplicateEmailException;
 import com.seouldate.user.exception.EmailNotVerifiedException;
-import com.seouldate.user.repository.UserRepository;
-import com.seouldate.user.dto.request.auth.EmailVerifyConfirmRequest;
-import com.seouldate.user.dto.request.auth.EmailVerifyRequest;
-import com.seouldate.user.dto.request.auth.VerificationType;
 import com.seouldate.user.exception.InvalidVerificationCodeException;
+import com.seouldate.user.repository.UserRepository;
+import com.seouldate.user.util.CryptoUtil;
 import com.seouldate.user.util.JwtUtil;
-import org.springframework.mail.SimpleMailMessage;
-import static org.mockito.BDDMockito.then;
-import static org.mockito.ArgumentMatchers.eq;
 
 /**
  * AuthService 단위 테스트
@@ -118,6 +119,7 @@ class AuthServiceTest {
     private StringRedisTemplate redisTemplate;
     private ValueOperations<String, String> valueOperations;
     private JavaMailSender mailSender;
+    private CryptoUtil cryptoUtil;
 
     @BeforeEach
     void globalSetUp() {
@@ -127,12 +129,16 @@ class AuthServiceTest {
         redisTemplate = Mockito.mock(StringRedisTemplate.class);
         valueOperations = Mockito.mock(ValueOperations.class);
         mailSender = Mockito.mock(JavaMailSender.class);
+        cryptoUtil = Mockito.mock(CryptoUtil.class);
 
         // Manually instantiate AuthService and inject mocks
-        authService = new AuthService(userRepository, redisTemplate, passwordEncoder, jwtUtil, mailSender);
+        authService = new AuthService(userRepository, redisTemplate, passwordEncoder, jwtUtil, mailSender, cryptoUtil);
 
         // Configure common mock behaviors
         given(passwordEncoder.encode(anyString())).willReturn("encodedPassword");
+        // CryptoUtil 기본 동작 설정
+        given(cryptoUtil.hash(anyString())).willReturn("hashedEmail");
+        given(cryptoUtil.encrypt(anyString())).willReturn("encryptedEmail");
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -167,8 +173,8 @@ class AuthServiceTest {
         void signup_success() {
             // ── Given (준비) ──────────────────────────────────────────────
 
-            // 1) 이메일 중복 없음
-            given(userRepository.existsByEmail(signupRequest.getEmail())).willReturn(false);
+            // 1) 이메일 해시 중복 없음 (hash 기반 조회)
+            given(userRepository.existsByEmailHash(anyString())).willReturn(false);
 
             // 2) Redis에 인증 완료 키 있음 ("verified:{email}")
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
@@ -178,16 +184,17 @@ class AuthServiceTest {
             assertThat(Mockito.mockingDetails(passwordEncoder).isMock()).isTrue();
             given(passwordEncoder.encode(anyString())).willReturn("encodedPassword");
 
-            // 4) userRepository.save() 가 Domain > User 를 반환하도록 설정
+            // 4) userRepository.save() 가 저장된 User 를 반환하도록 설정
             User savedUser = User.builder()
-                    .id(1L)
-                    .email("test@example.com")
-                    .role(User.UserRole.USER)
-                    .provider(User.AuthProvider.EMAIL)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .emailEnc("encryptedEmail")
+                    .mbrTpCd("GEN")
+                    .providerCd(User.AuthProvider.EMAIL)
                     .build();
             given(userRepository.save(any(User.class))).willReturn(savedUser);
 
-            // 5) JWT 토큰 생성 설정 (강제로 기본값 설정)
+            // 5) JWT 토큰 생성 설정
             given(jwtUtil.generateAccessToken(anyLong(), anyString(), anyString())).willReturn("accessToken");
             given(jwtUtil.generateRefreshToken(anyLong())).willReturn("refreshToken");
 
@@ -198,19 +205,16 @@ class AuthServiceTest {
             assertThat(result.getUserSeq()).isEqualTo(1L);
             assertThat(result.getAccessToken()).isEqualTo("accessToken");
             assertThat(result.getRefreshToken()).isEqualTo("refreshToken");
-
-            // verify(memberRepository, times(1)).save(any(Member.class));
         }
 
         @Test
         @DisplayName("실패: 이미 가입된 이메일이면 DuplicateEmailException 이 발생한다")
         void signup_duplicateEmail() {
             // ── Given ─────────────────────────────────────────────────────
-            // existEmail 이 항상 true로 줄때
-            given(userRepository.existsByEmail(anyString())).willReturn(true);
+            // emailHash 중복 시 true 반환
+            given(userRepository.existsByEmailHash(anyString())).willReturn(true);
 
             // ── When & Then ───────────────────────────────────────────────
-            // signup 실행시, DuplicateEmailException 이 발생한다.
             assertThatThrownBy(() -> authService.signup(signupRequest))
                             .isInstanceOf(DuplicateEmailException.class);
         }
@@ -219,11 +223,9 @@ class AuthServiceTest {
         @DisplayName("실패: 이메일 인증을 완료하지 않으면 EmailNotVerifiedException 이 발생한다")
         void signup_emailNotVerified() {
             // ── Given ─────────────────────────────────────────────────────
-            // - 이메일 중복 없음, 나이 통과 (1995년생)
-            // - Redis 에 인증 키가 없음 (null 반환)
-            // 1) 이메일 중복 없음
-            given(userRepository.existsByEmail(anyString())).willReturn(false);
-            
+            // 1) 이메일 해시 중복 없음
+            given(userRepository.existsByEmailHash(anyString())).willReturn(false);
+
             // 2) Redis 에 인증 키가 없음
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
             given(valueOperations.get(anyString())).willReturn(null);
@@ -294,14 +296,16 @@ class AuthServiceTest {
             // 2) Redis에 저장된 값
             given(redisTemplate.opsForValue()).willReturn(valueOperations);
             given(valueOperations.get(eq("verify:SIGNUP:" + email))).willReturn(code);
-        
+            // 3) getOperations().delete() 호출 시 NPE 방지 — redisTemplate Mock 자체에서 delete 허용
+            given(valueOperations.getOperations()).willReturn(redisTemplate);
+
             // ── When ──────────────────────────────────────────────────────
             authService.confirmVerificationCode(request);
 
             // ── Then ──────────────────────────────────────────────────────
             // 기존 코드 삭제 검증
             then(redisTemplate).should().delete("verify:SIGNUP:" + email);
-            
+
             // SIGNUP 타입이면 "verified:{email}" 키가 저장되었는지 검증
             then(valueOperations).should().set(
                 eq("verified:" + email),
@@ -310,6 +314,7 @@ class AuthServiceTest {
                 any()
             );
         }
+
 
         @Test
         @DisplayName("실패: 코드가 만료됐거나 없으면 InvalidVerificationCodeException 이 발생한다")
@@ -358,17 +363,14 @@ class AuthServiceTest {
 
         @BeforeEach
         void setUp() {
-            // 힌트 — @BeforeEach:
-            // 각 @Test 메서드 실행 전에 호출됩니다.
-            // 공통 초기화 코드를 여기에 작성하면 각 테스트에서 중복을 줄일 수 있습니다.
             activeUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .password("encodedPassword")
-                    .nickname("유저")
-                    .provider(User.AuthProvider.EMAIL)
-                    .role(User.UserRole.USER)
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .emailEnc("encryptedEmail")
+                    .passwdEnc("encodedPassword")
+                    .mbrNm("유저")
+                    .providerCd(User.AuthProvider.EMAIL)
+                    .mbrTpCd("GEN")
                     .build();
         }
 
@@ -460,10 +462,10 @@ class AuthServiceTest {
         @BeforeEach
         void setUp() {
             activeUser = User.builder()
-                    .id(1L)
-                    .email("user@example.com")
-                    .password("encodedPassword")
-                    .enabled(true)
+                    .userSeq(1L)
+                    .emailHash("hashedEmail")
+                    .emailEnc("encryptedEmail")
+                    .passwdEnc("encodedPassword")
                     .build();
         }
 
